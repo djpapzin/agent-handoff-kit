@@ -9,7 +9,7 @@
 - Git 2.50.1 and Python 3.9.6 available. No dependencies installed.
 - No applicable AGENTS.md found in the workspace's filesystem ancestor directories; this repository's AGENTS.md defines its isolation and architecture-only stage.
 
-## Event context and unresolved requirements
+## Initial event context and requirements (historical)
 
 The owner’s 24 September organizer update records the official window as 25 September 15:00 UTC through 27 September 15:00 UTC (17:00 SAST both days). The official live page was rechecked on 26 September and reports live/submissions open: https://lablab.ai/ai-hackathons/ibm-bob-2-hackathon/live . Its fetched countdown was zero and is not used as cutoff evidence.
 
@@ -32,7 +32,9 @@ the browser-readable rulebook and submission guide: public GitHub, interactive
 application URL, event-specific MP4 up to three minutes (at least 90 seconds demonstration), PDF slides, cover and description
 fields. See ORGANIZER-REQUIREMENTS.md for the complete source-backed checklist.
 A local-only CLI is not sufficient. Existing-code reuse is avoided by design;
-no event-specific reuse permission is claimed. Authenticated lablab team,
-Discord access and final form inspection remain pending user sign-in.
+no event-specific reuse permission is claimed. The account blockers at this stage
+were subsequently resolved as recorded below.
 
 GitHub sign-in and lablab solo team creation verified on 26 September: Agent Handoff Kit, UTC+2, sole user member, membership closed. Authenticated submission step 1 inspected; no project submitted. See ORGANIZER-REQUIREMENTS.md for stricter event-specific media and statement limits.
+
+Discord verification after user sign-in: authenticated as DjPapzin / djpapzin in LABLAB.AI. The IBM Bob 2.0 hackathon updates channel is readable: https://discord.com/channels/877056448956346408/1549403437807050955 . Event matchmaking and participant-chat links are visible. No Discord messages were sent. Account/access checks are complete; implementation and submission remain unstarted.

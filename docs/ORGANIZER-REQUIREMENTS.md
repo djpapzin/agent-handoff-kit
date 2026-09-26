@@ -2,7 +2,7 @@
 
 Codex researched official organizer pages and the 24 September organizer email.
 These are requirements and verification states, not a claim that a submission
-or all account checks are complete. No organizer message was sent.
+is complete. Account/access checks were completed in the follow-ups below. No organizer message was sent.
 
 ## Sources
 
@@ -30,7 +30,7 @@ or all account checks are complete. No organizer message was sent.
 | Existing code | Event-specific reuse permission was not found. Fresh implementation, disclose pre-existing idea and Codex setup baseline. Avoid reuse rather than assume permission. No unresolved reuse dependency for this fresh scope. |
 | Deadline | Target 27 September 2026 at 17:00 SAST (15:00 UTC). Rulebook's manual route requires valid reason AND prior organizer/mentor approval, within six hours; not an automatic grace period. |
 
-## Account checks still blocked
+## Initial account blockers (historical; resolved below)
 
 Prior approval email confirms the user's event application was approved. Bob
 Enterprise team ibm-hackathon-lablab is verified; the event guide explicitly
@@ -99,3 +99,21 @@ Discord invite resolved to the existing-account login page in Safari, offering
 password, mobile QR or passkey. No authenticated Discord session is available;
 user must complete this authentication. No new Discord account or server
 membership was created, and no message was sent.
+
+## Discord verification — 26 September
+
+After the user completed sign-in, Safari showed the authenticated DjPapzin /
+djpapzin account in the LABLAB.AI server. The official IBM Bob 2.0 hackathon
+updates channel loaded readable organizer announcements, including the
+25 September kickoff and Q&A notices. Event matchmaking and participant-chat
+channel links were also visible.
+
+- [Official event updates](https://discord.com/channels/877056448956346408/1549403437807050955)
+- [Event matchmaking](https://discord.com/channels/877056448956346408/1549403440189411429)
+- [Event participant chat](https://discord.com/channels/877056448956346408/1549403442206875779)
+
+This resolves the remaining Discord membership/channel-access blocker above.
+No Discord message, invitation, reaction, or subscription was sent. A dedicated
+team channel remains unavailable to a solo team under the two-member condition;
+general event-channel access is verified. Account/access checks are complete.
+The project still has no working prototype, public repository, or submission.
