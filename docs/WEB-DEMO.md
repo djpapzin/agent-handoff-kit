@@ -82,3 +82,43 @@ usage, with $5 monthly credits and charges for extra resource usage. Upgrade and
 a maximum monthly budget were requested from the user; neither is yet approved.
 The existing Dockerfile uses PORT and binds 0.0.0.0; /healthz is ready for Railway.
 No runtime code changed and no new runtime verification is claimed.
+
+The user subsequently specified zero-budget hosting. No paid Railway or Render
+plan is authorized; the pending upgrade request is superseded. Free alternatives
+are being evaluated.
+
+## PythonAnywhere WSGI hosting — prepared, not deployed
+
+The user selected PythonAnywhere Free on 26 September. The dependency-free
+`handoff_kit.wsgi.application` entry point serves the same assets and calls the
+same real-process scenario synchronously. All child work ends within the request;
+no background tasks, Docker, additional packages or paid features are needed by
+the adapter. Host-specific subprocess permission and CPU limits remain unverified.
+
+Deployment steps once the website is accessible:
+
+1. In a PythonAnywhere Bash console, clone the public project repository:
+   `git clone https://github.com/djpapzin/agent-handoff-kit.git`
+2. Add a free Web app using Manual configuration and Python 3.9 or newer.
+3. Set its WSGI configuration to the following, replacing YOUR_USERNAME:
+
+   ```python
+   import sys
+   sys.path.insert(0, '/home/YOUR_USERNAME/agent-handoff-kit')
+   from handoff_kit.wsgi import application
+   ```
+
+4. Reload the web app, check `/healthz`, then run the browser demo and verify
+   DONE, generation 2, one receipt, nine history events and unchanged replay.
+5. Do not mark hosted verification complete until that public run succeeds.
+
+Local validation: 4 adapter tests include WSGI protocol validation, asset routes,
+input rejection, error redaction and a real process-kill recovery through WSGI.
+The full suite passed: 113 tests in 11.639 seconds.
+See verification-wsgi-tests.txt for the full suite result. PythonAnywhere's login
+page and homepage returned server error pages during setup. The homepage later
+recovered, but following its Log in link still returned HTTP 500. No account, hosted app, paid service or public demo URL was created.
+
+PythonAnywhere notes that subprocesses outliving a web request may be killed:
+https://help.pythonanywhere.com/pages/AsyncInWebApps/ . This adapter waits for the
+scenario to finish before returning and retains its 20-second process-group limit.

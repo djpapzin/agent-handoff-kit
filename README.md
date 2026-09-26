@@ -36,7 +36,7 @@ events, and read-only replay. The two workers are real separate processes.
 python3 -m unittest discover -s tests -v
 ```
 
-109 tests passed on Python 3.9.6 (103 core tests and 6 web tests). Includes concurrent process claims, abrupt
+113 tests passed on Python 3.9.6 (103 core, 6 HTTP and 4 WSGI tests). Includes concurrent process claims, abrupt
 process death before/after every step commit, transaction rollback, stale leases,
 malformed evidence, input mismatches and uncertain commit acknowledgement.
 See [implementation report](docs/IMPLEMENTATION-REPORT.md) for results and limits.
@@ -79,9 +79,9 @@ includes the task ID and consumption screenshot. No prior OddsEdge implementatio
 production data or secrets were copied.
 
 The local core and interactive web app are ready. The source is public at
-https://github.com/djpapzin/agent-handoff-kit under the MIT license. Railway hosting
-is pending: after Render exhausted its free allowance, Railway also blocked new
-projects because the account free-plan resource limit is reached. No paid upgrade
-or public application deployment has been made. Submission video/slides/statements
+https://github.com/djpapzin/agent-handoff-kit under the MIT license. A PythonAnywhere-compatible WSGI adapter is prepared; public deployment is pending
+because its website returned server errors. Render and Railway free-account limits
+blocked earlier attempts. The hosting budget is zero; no paid upgrade or public
+application deployment has been made. Submission video/slides/statements
 and final submission remain future work.
 [Organizer requirements](docs/ORGANIZER-REQUIREMENTS.md) record event-specific limits.
