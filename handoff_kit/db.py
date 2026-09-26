@@ -6,7 +6,9 @@ import sqlite3
 import time
 from typing import Callable, Optional, TypeVar
 
-from .schema import init_db
+from .schema import init_db, check_version
+from pathlib import Path
+from .models import HandoffError
 
 # ---------------------------------------------------------------------------
 # SQLite lock-error detection (Python 3.9 compatible — no errorcode attr)
@@ -46,6 +48,11 @@ def open_conn(db_path: str) -> sqlite3.Connection:
     # Pragmas that take effect per-connection
     conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
     conn.execute("PRAGMA foreign_keys = ON")
+    try:
+        check_version(conn, allow_empty=True)
+    except BaseException:
+        conn.close()
+        raise
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA synchronous = FULL")
     return conn
@@ -54,8 +61,56 @@ def open_conn(db_path: str) -> sqlite3.Connection:
 def open_and_init(db_path: str) -> sqlite3.Connection:
     """Open connection and initialise / verify schema."""
     conn = open_conn(db_path)
-    init_db(conn)
-    return conn
+    try:
+        init_db(conn)
+        return conn
+    except BaseException:
+        conn.close()
+        raise
+
+
+def open_readonly(db_path: str):
+    conn = sqlite3.connect(Path(db_path).resolve().as_uri() + "?mode=ro", uri=True, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    try:
+        check_version(conn)
+        conn.execute("PRAGMA query_only=ON")
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+    except BaseException:
+        conn.close()
+        raise
+
+
+class CommitUncertain(HandoffError):
+    """The caller must halt; evidence is an observation, never retry permission."""
+    def __init__(self, evidence):
+        super().__init__("Commit outcome uncertain; halted. Read-only inspection: " + str(evidence))
+        self.evidence = evidence
+
+
+def _inspect_after_uncertainty(path):
+    if not path:
+        return {"error": "No durable database path available"}
+    try:
+        from .worker import _row_to_job, _validate_prefix
+        conn = open_readonly(path)
+        try:
+            conn.execute("BEGIN")
+            evidence = {}
+            for row in conn.execute("SELECT * FROM jobs"):
+                job = _row_to_job(row)
+                try:
+                    cp = _validate_prefix(conn, job)
+                    evidence[job.job_id] = {"status": job.status.value, "completed_steps": cp["completed_steps"]}
+                except Exception as exc:
+                    evidence[job.job_id] = {"integrity_error": str(exc)}
+            conn.execute("ROLLBACK")
+            return evidence
+        finally:
+            conn.close()
+    except Exception as exc:
+        return {"storage_error": str(exc)}
 
 
 # ---------------------------------------------------------------------------
@@ -105,9 +160,19 @@ def run_immediate(
                 raise ValueError(f"Non-finite clock value: {now!r}")
 
             result = body(conn, now)
-            conn.execute("COMMIT")
+            path = conn.execute("PRAGMA database_list").fetchone()[2]
+            try:
+                conn.execute("COMMIT")
+            except Exception as exc:
+                # Never repeat a body when COMMIT might have reached disk.
+                try:
+                    if conn.in_transaction:
+                        conn.execute("ROLLBACK")
+                finally:
+                    conn.close()
+                raise CommitUncertain(_inspect_after_uncertainty(path)) from exc
             return result
-        except Exception:
+        except BaseException:
             try:
                 conn.execute("ROLLBACK")
             except Exception:

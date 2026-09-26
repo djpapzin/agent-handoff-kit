@@ -117,3 +117,10 @@ No Discord message, invitation, reaction, or subscription was sent. A dedicated
 team channel remains unavailable to a solo team under the two-member condition;
 general event-channel access is verified. Account/access checks are complete.
 The project still has no working prototype, public repository, or submission.
+
+## Core implementation follow-up
+
+The local core is now implemented and verified (103 tests and a real process-kill
+recovery demo). Earlier statements that implementation is unstarted are historical.
+See IMPLEMENTATION-REPORT.md. Online packaging, publication and submission remain
+outstanding.

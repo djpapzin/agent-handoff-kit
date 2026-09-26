@@ -372,11 +372,10 @@ class TestTerminalStates(_DBTest):
         with self.assertRaises(NotClaimable):
             claim(self.db, "j1", INPUT_RAW, "wB")
 
-    def test_done_run_job_raises_not_claimable(self):
+    def test_done_run_job_returns_verified_done(self):
         create(self.db, "j1", INPUT_RAW)
         run_job(self.db, "j1", INPUT_RAW, "wA")
-        with self.assertRaises(NotClaimable):
-            run_job(self.db, "j1", INPUT_RAW, "wB")
+        self.assertEqual(run_job(self.db, "j1", INPUT_RAW, "wB").status, Status.DONE)
 
     def test_repeated_replay_read_only(self):
         create(self.db, "j1", INPUT_RAW)
@@ -892,6 +891,7 @@ class TestNeedsReview(_DBTest):
         # Corrupt the receipt's result_json directly
         conn = open_and_init(self.db)
         try:
+            conn.execute("DROP TRIGGER trg_receipts_no_update")
             conn.execute(
                 "UPDATE receipts SET result_json='NOT JSON' WHERE job_id='j1'"
             )
@@ -1144,7 +1144,7 @@ class TestLockContention(_DBTest):
         try:
             def _body(c, now):
                 c.execute(
-                    "UPDATE jobs SET status='RUNNING' WHERE job_id='j1'"
+                    "UPDATE jobs SET updated_at=42 WHERE job_id='j1'"
                 )
                 raise RuntimeError("deliberate")
             with self.assertRaises(RuntimeError):

@@ -29,3 +29,9 @@ Worker review to address before completion: run_job must validate the entire dur
 ## Review follow-up 3 (steered and visibly received)
 
 Use python3 -m unittest discover -s tests -v (Python 3.9.6 is installed as python3; no pytest/dependency installation). Incorporate both queued review messages now and read docs/CODEX-IMPLEMENTATION-REVIEW.md. My first independent run: 63 tests, 7 errors. Fix those plus real step-targeted abrupt process-death coverage, separate A/B subprocesses with actual lease timeout, and no deletion of preexisting demo DB paths. Address all findings, run corrected tests and demo, then update the report with actual results.
+
+## Continuation and handoff messages
+
+Continue implementing all corrections in docs/CODEX-IMPLEMENTATION-REVIEW.md and the saved review follow-ups. Finish the code, tests, real crash demo and report, then run python3 -m unittest discover -s tests -v.
+
+Stop implementation edits now and provide a concise handoff summary only: actual files authored, commands run, current failures, task consumption. Do not change tests or code further. Codex will complete the independent review fixes. In particular, keep the strict review expectations: DONE run returns verified stored result, status on missing DB creates no file, unknown schema causes no writes.

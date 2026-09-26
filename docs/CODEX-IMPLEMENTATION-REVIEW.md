@@ -55,3 +55,11 @@ Independent five-test regression run after first correction pass: three
 failures and two errors. Remaining issues: unknown-version open changes the
 SQLite journal header, infinite expiry is accepted, missing-DB status creates
 a file, DONE run raises NotClaimable, and >3 checkpoint steps raises IndexError.
+
+## Final disposition
+
+The above implementation findings were resolved by Codex after preserving Bob's
+output at e47d4b5. The strict independent tests were restored; all 103 tests pass.
+Real before/after-commit crash cases, expired-state races, uncertain commit
+observations, and an actual process-kill demo passed. See IMPLEMENTATION-REPORT.md
+for evidence, attribution, and remaining physical-failure limitations.

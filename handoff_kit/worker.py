@@ -18,7 +18,7 @@ import time
 import uuid
 from typing import Callable, List, Optional
 
-from .db import open_and_init, run_immediate
+from .db import open_and_init, open_readonly, run_immediate
 from .models import (
     ACTIVE_STATES,
     STEPS,
@@ -244,7 +244,7 @@ def claim(
             pass  # Always claimable
         elif old_status in ACTIVE_STATES:
             # Validate lease expiry field presence (corruption guard)
-            if job.lease_expiry is None:
+            if job.lease_expiry is None or not isinstance(job.lease_expiry, (int, float)) or not math.isfinite(job.lease_expiry):
                 raise GuardFailed(
                     f"Job {job_id!r} has active status {old_status.value!r} "
                     "but NULL lease_expiry — possible corruption."
@@ -321,7 +321,7 @@ def _check_holder_guard(
         raise StaleOwner(
             f"Guard failed: generation is {job.generation}, expected {generation}."
         )
-    if job.lease_expiry is None or job.lease_expiry <= now:
+    if job.lease_expiry is None or not isinstance(job.lease_expiry, (int, float)) or not math.isfinite(job.lease_expiry) or job.lease_expiry <= now:
         raise StaleOwner(
             f"Guard failed: lease expired at {job.lease_expiry} (now={now})."
         )
@@ -522,6 +522,13 @@ def _validate_prefix(
     completed = cp["completed_steps"]
     results_map = cp["results"]
 
+    if any(not isinstance(x, str) for x in completed) or completed != list(STEPS[:len(completed)]) or len(completed) > len(STEPS):
+        raise InconsistentState("Checkpoint is not an ordered step prefix")
+    if job.status in ACTIVE_STATES and len(completed) == len(STEPS):
+        raise InconsistentState("Active job has a complete checkpoint")
+    if job.status == Status.DONE and completed != list(STEPS):
+        raise InconsistentState("DONE job has an incomplete checkpoint")
+
     # Reject extra entries in results_map beyond completed steps
     extra_keys = set(results_map) - set(completed)
     if extra_keys:
@@ -533,7 +540,7 @@ def _validate_prefix(
     for i, step_name in enumerate(completed):
         if i >= len(STEPS) or STEPS[i] != step_name:
             raise InconsistentState(
-                f"Checkpoint step {i} is {step_name!r}; expected {STEPS[i]!r}."
+                f"Checkpoint step {i} is invalid: {step_name!r}."
             )
 
     # Check for duplicate steps
@@ -613,7 +620,7 @@ def _validate_prefix(
             stored_r = json.loads(receipt.result_json)
         except json.JSONDecodeError as exc:
             raise InconsistentState(f"Receipt result_json is invalid JSON: {exc}") from exc
-        if canonical_result(stored_r) != canonical_result(expected_result):
+        if receipt.result_json != canonical_result(expected_result):
             raise InconsistentState("Receipt result mismatch.")
         if receipt.result_hash != expected_result_hash:
             raise InconsistentState("Receipt result_hash mismatch.")
@@ -917,7 +924,10 @@ def commit_step(
 
     conn = open_and_init(db_path)
     try:
-        return run_immediate(conn, _body, clock=clock)
+        result = run_immediate(conn, _body, clock=clock)
+        if fault_hook:
+            fault_hook("after_commit")
+        return result
     finally:
         conn.close()
 
@@ -939,8 +949,8 @@ def run_job(
     """
     Claim (or re-claim) and execute all remaining steps.
 
-    If the job is already DONE, performs a read-only replay and raises
-    NotClaimable (terminal — no writes).
+    If the job is already DONE, performs a verified read-only replay and returns
+    the stored terminal job (no writes).
 
     Returns the final JobRow (DONE or terminal hold).
 
@@ -952,7 +962,7 @@ def run_job(
 
     # If already DONE, route to read-only replay.
     # Check status without claiming first.
-    conn_check = open_and_init(db_path)
+    conn_check = open_readonly(db_path)
     try:
         conn_check.execute("BEGIN")
         try:
@@ -963,10 +973,8 @@ def run_job(
         conn_check.close()
 
     if row is not None and row.status == Status.DONE:
-        # Terminal — raise NotClaimable; callers may use replay() directly.
-        raise NotClaimable(
-            f"Job {job_id!r} is already DONE. Use replay() to read results."
-        )
+        replay(db_path, job_id, input_raw)
+        return row
 
     job = claim(db_path, job_id, input_raw, worker_id, ttl=ttl, clock=clock)
     gen = job.generation
@@ -1003,8 +1011,7 @@ def run_job(
                 job = renew(db_path, job_id, worker_id, gen, ttl=ttl, clock=clock)
                 last_renewal = now
             except (StaleOwner, GuardFailed):
-                # Lease gone — stop
-                return job
+                raise
 
         # Refresh checkpoint for next iteration
         try:
@@ -1018,7 +1025,7 @@ def run_job(
 
 def _read_terminal_job(db_path: str, job_id: str) -> JobRow:
     """Read current job row without any write (for post-hold return)."""
-    conn = open_and_init(db_path)
+    conn = open_readonly(db_path)
     try:
         conn.execute("BEGIN")
         try:
@@ -1048,7 +1055,7 @@ def replay(
     """
     canonical_presented, presented_hash = hash_input(input_raw)
 
-    conn = open_and_init(db_path)
+    conn = open_readonly(db_path)
     try:
         conn.execute("BEGIN")  # consistent read
         try:
@@ -1104,7 +1111,7 @@ def replay(
 
 def get_status(db_path: str, job_id: str) -> dict:
     """Read-only status report."""
-    conn = open_and_init(db_path)
+    conn = open_readonly(db_path)
     try:
         conn.execute("BEGIN")
         try:
@@ -1122,6 +1129,8 @@ def get_status(db_path: str, job_id: str) -> dict:
                 last_step = None
                 next_s = None
 
+            if job.status == Status.DONE:
+                _validate_prefix(conn, job)
             receipt = _read_receipt(conn, job_id)
             conn.execute("ROLLBACK")
 
@@ -1130,7 +1139,7 @@ def get_status(db_path: str, job_id: str) -> dict:
             elif job.status in (Status.FAILED, Status.NEEDS_REVIEW):
                 next_action = "inspect only"
             elif job.status in ACTIVE_STATES:
-                next_action = "wait or recover after expiry"
+                next_action = "wait" if job.lease_expiry > time.time() else "recover with matching input"
             else:
                 next_action = "run"
 
@@ -1162,7 +1171,7 @@ def get_status(db_path: str, job_id: str) -> dict:
 
 def get_history(db_path: str, job_id: str) -> List[HistoryRow]:
     """Read-only history for a job, ordered by seq."""
-    conn = open_and_init(db_path)
+    conn = open_readonly(db_path)
     try:
         conn.execute("BEGIN")
         try:

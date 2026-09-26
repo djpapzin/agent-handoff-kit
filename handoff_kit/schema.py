@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS jobs (
                           'DONE','FAILED','NEEDS_REVIEW')),
     owner           TEXT,
     lease_expiry    REAL
-        CHECK(lease_expiry IS NULL OR (typeof(lease_expiry) = 'real' AND lease_expiry > 0)),
+        CHECK(lease_expiry IS NULL OR (typeof(lease_expiry) = 'real' AND abs(lease_expiry) <= 1.7976931348623157e308)),
     generation      INTEGER NOT NULL DEFAULT 0
         CHECK(generation >= 0),
     checkpoint_json TEXT NOT NULL DEFAULT '{"completed_steps":[],"results":{},"schema_version":1}',
@@ -147,45 +147,31 @@ def _apply_conn_pragmas(conn: sqlite3.Connection) -> None:
     conn.executescript(_CONN_PRAGMAS)
 
 
+def check_version(conn, allow_empty=False):
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if not tables and allow_empty:
+        return False
+    if "schema_meta" not in tables:
+        raise RuntimeError("Unsupported DB schema: missing version metadata")
+    row = conn.execute("SELECT value FROM schema_meta WHERE key='version'").fetchone()
+    if row is None or row[0] != str(SCHEMA_VERSION):
+        raise RuntimeError("Unsupported DB schema version; no writes performed")
+    if not {"jobs", "receipts", "history"}.issubset(tables):
+        raise RuntimeError("Incomplete DB schema; no writes performed")
+    return True
+
+
 def init_db(conn: sqlite3.Connection) -> None:
-    """
-    Initialise or verify schema.
-
-    Order of operations:
-    1. Check existing schema version BEFORE any writes or pragmas that
-       modify the database file.  If the version is unknown, raise immediately.
-    2. Apply per-connection pragmas (WAL mode etc.).  Only reached when the
-       version is absent (fresh DB) or matches.
-    3. Create tables/triggers.
-    4. Insert version row for fresh databases.
-    """
-    # Step 1 — check version before any writes (no pragma executescript yet)
-    try:
-        cur = conn.execute("SELECT value FROM schema_meta WHERE key='version'")
-        row = cur.fetchone()
-    except sqlite3.OperationalError:
-        # schema_meta doesn't exist yet — fresh database
-        row = None
-
-    if row is not None:
-        stored = int(row[0])
-        if stored != SCHEMA_VERSION:
-            raise RuntimeError(
-                f"Unsupported DB schema version {stored}; expected {SCHEMA_VERSION}. "
-                "No writes performed."
-            )
-
-    # Step 2 — apply pragmas (only after version check passes)
+    """Existing schemas are verified without DDL or repair."""
+    if check_version(conn, allow_empty=True):
+        return
     _apply_conn_pragmas(conn)
-
-    # Step 3 — safe to create schema (version matches or is absent)
-    conn.executescript(_SCHEMA_DDL)
-
-    # Step 4 — insert version row if still missing
-    cur = conn.execute("SELECT value FROM schema_meta WHERE key='version'")
-    if cur.fetchone() is None:
-        conn.execute(
-            "INSERT INTO schema_meta(key, value) VALUES ('version', ?)",
-            (str(SCHEMA_VERSION),),
-        )
-        conn.commit()
+    try:
+        conn.executescript("BEGIN IMMEDIATE;\n" + _SCHEMA_DDL)
+        conn.execute("INSERT OR IGNORE INTO schema_meta(key,value) VALUES ('version',?)", (str(SCHEMA_VERSION),))
+        check_version(conn)
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise

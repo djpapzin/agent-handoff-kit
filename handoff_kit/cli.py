@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import uuid
+import sqlite3
 from pathlib import Path
 
 from .worker import (
@@ -51,8 +53,10 @@ def cmd_create(args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     raw = _load_input(args.input_file)
     try:
-        job = run_job(args.db, args.job_id, raw, args.worker_id)
+        job = run_job(args.db, args.job_id, raw, args.worker_id + "-" + uuid.uuid4().hex, ttl=args.ttl, heartbeat=args.heartbeat)
         print(f"Job {job.job_id!r} → {job.status.value}")
+        if job.status.value == "DONE":
+            print(json.dumps(replay(args.db, args.job_id, raw), indent=2))
         if job.failure_reason:
             print(f"  reason: {job.failure_reason}")
         return 0
@@ -132,6 +136,8 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--job-id", required=True)
     pr.add_argument("--input-file", required=True)
     pr.add_argument("--worker-id", required=True)
+    pr.add_argument("--ttl", type=float, default=30)
+    pr.add_argument("--heartbeat", type=float, default=10)
     pr.set_defaults(func=cmd_run)
 
     # recover
@@ -139,6 +145,8 @@ def build_parser() -> argparse.ArgumentParser:
     prec.add_argument("--job-id", required=True)
     prec.add_argument("--input-file", required=True)
     prec.add_argument("--worker-id", required=True)
+    prec.add_argument("--ttl", type=float, default=30)
+    prec.add_argument("--heartbeat", type=float, default=10)
     prec.set_defaults(func=cmd_recover)
 
     # status
@@ -163,7 +171,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (HandoffError, sqlite3.Error, ValueError, OSError, RuntimeError) as exc:
+        print("error: " + str(exc), file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

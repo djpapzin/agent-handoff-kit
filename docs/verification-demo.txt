@@ -1,0 +1,21 @@
+A pid=90030 generation=1 killed after receipt checkpoint
+Waiting 2.04s for actual lease expiry
+B pid=90031 generation=2 reached DONE in 0.091s (including process startup)
+Receipt count: 1; replay: unchanged jobs, receipts and history
+1 gen=0 create - -> PENDING
+2 gen=1 claim - -> CLAIMED
+3 gen=1 begin_step validate -> RUNNING
+4 gen=1 commit_step validate -> CHECKPOINT
+5 gen=1 begin_step create_receipt -> RUNNING
+6 gen=1 commit_step create_receipt -> CHECKPOINT
+7 gen=2 claim - -> CLAIMED
+8 gen=2 begin_step summarize -> RUNNING
+9 gen=2 commit_done summarize -> DONE
+{
+  "artifact": "sample.txt",
+  "input_hash": "fcb562e14788eca241e21e6bb51d32595991576ad3a33837f8bc793e5b1bfe82",
+  "job_id": "job-demo",
+  "receipt_for": "job-demo",
+  "validated": true
+}
+PASS: real worker kill, expired-lease recovery, single receipt, read-only replay

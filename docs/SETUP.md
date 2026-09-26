@@ -38,3 +38,10 @@ were subsequently resolved as recorded below.
 GitHub sign-in and lablab solo team creation verified on 26 September: Agent Handoff Kit, UTC+2, sole user member, membership closed. Authenticated submission step 1 inspected; no project submitted. See ORGANIZER-REQUIREMENTS.md for stricter event-specific media and statement limits.
 
 Discord verification after user sign-in: authenticated as DjPapzin / djpapzin in LABLAB.AI. The IBM Bob 2.0 hackathon updates channel is readable: https://discord.com/channels/877056448956346408/1549403437807050955 . Event matchmaking and participant-chat links are visible. No Discord messages were sent. Account/access checks are complete; implementation and submission remain unstarted.
+
+## Core implementation follow-up
+
+The local core is now implemented and verified (103 tests and a real process-kill
+recovery demo). Earlier statements that implementation is unstarted are historical.
+See IMPLEMENTATION-REPORT.md. Online packaging, publication and submission remain
+outstanding.
