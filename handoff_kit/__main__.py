@@ -1,0 +1,6 @@
+"""Package entry point: python -m handoff_kit [args]"""
+from .cli import main
+import sys
+
+if __name__ == "__main__":
+    sys.exit(main())

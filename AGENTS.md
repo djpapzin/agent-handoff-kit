@@ -2,7 +2,7 @@
 
 This is an isolated hackathon workspace. Use synthetic inputs and a separate local SQLite database only. Do not access production repositories, databases, browser sessions, credentials, Telegram tokens, or personal data.
 
-Current stage: setup and architecture review only. Do not implement code, install dependencies, deploy, publish, or submit. Write the first architecture proposal to docs/ARCHITECTURE.md and then stop for review.
+Current stage: core implementation and verification, authorized by the user on 26 September 2026. Implement the reviewed docs/ARCHITECTURE.md revision 4 using Python 3.9 standard library and SQLite, with meaningful tests and a reproducible local demo. No dependency installation is needed. Deployment, publication and final submission are later steps; do not perform them during this core task.
 
 Scope: Python standard library, SQLite, thin CLI; one job, two local worker processes, one recovery. Telegram is optional and deferred. No dashboard, paid providers, live wagers, cloud orchestration, or billing.
 
