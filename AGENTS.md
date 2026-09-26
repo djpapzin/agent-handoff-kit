@@ -2,7 +2,7 @@
 
 This is an isolated hackathon workspace. Use synthetic inputs and a separate local SQLite database only. Do not access production repositories, databases, browser sessions, credentials, Telegram tokens, or personal data.
 
-Current stage: interactive web packaging, authorized by the user on 26 September 2026. Preserve the verified core and wrap the fixed synthetic scenario in a bounded web demo. Use isolated temporary databases and real worker processes; accept no arbitrary task input or commands. No dependencies are needed. Public hosting awaits the user’s hosting target; final hackathon submission remains a separate step.
+Current stage: interactive web packaging, authorized by the user on 26 September 2026. Preserve the verified core and wrap the fixed synthetic scenario in a bounded web demo. Use isolated temporary databases and real worker processes; accept no arbitrary task input or commands. No dependencies are needed. The user selected Render. Source is published at https://github.com/djpapzin/agent-handoff-kit. Render deployment is prepared but blocked by the workspace monthly free-instance allowance; paid compute awaits explicit user approval. Final hackathon submission remains a separate step.
 
 Scope: Python standard library, SQLite, thin CLI; one job, two local worker processes, one recovery. Telegram is optional and deferred. No dashboard, paid providers, live wagers, cloud orchestration, or billing.
 

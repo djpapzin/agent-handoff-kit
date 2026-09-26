@@ -42,8 +42,17 @@ docker run --rm -p 8080:8080 agent-handoff-kit
 ```
 
 The Docker image has not been built/tested in this task; local Python execution
-is verified. Hosting provider/account selection is pending. No public URL,
-account, paid service, repository publication or final submission was created.
+is verified. The user selected Render on 26 September 2026. The isolated source
+was published at https://github.com/djpapzin/agent-handoff-kit, default branch
+`hackathon/agent-handoff-kit`, with the MIT license.
+
+Render sign-in succeeded using the existing account. The new-service form is
+prepared with Docker, Frankfurt, the default branch, no secrets or disk, and
+health check `/healthz`. Creation on Free was rejected: "You have reached your
+free instance usage limit for this month. Please select a paid compute plan to
+continue." The next offered plan is $7/month (0.5 CPU, 512 MB). Approval for that
+recurring charge is pending. No service or public application URL was created,
+and no paid plan or final submission was committed.
 
 ## Verification — 26 September 2026
 

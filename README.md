@@ -78,6 +78,9 @@ separately attributed. [Actual Bob task evidence](bob_sessions/2026-09-26-core-s
 includes the task ID and consumption screenshot. No prior OddsEdge implementation,
 production data or secrets were copied.
 
-The local core and interactive web app are ready. Public hosting, public repository,
-submission video/slides/statements and final submission remain future work.
+The local core and interactive web app are ready. The source is public at
+https://github.com/djpapzin/agent-handoff-kit under the MIT license. Render hosting
+is prepared, but the workspace monthly free-instance allowance is exhausted;
+paid compute has not been approved or deployed. Submission video/slides/statements
+and final submission remain future work.
 [Organizer requirements](docs/ORGANIZER-REQUIREMENTS.md) record event-specific limits.
