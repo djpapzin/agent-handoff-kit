@@ -15,3 +15,7 @@ Read AGENTS.md and docs/BRIEF.md. Inspect this fresh baseline, then propose the 
 Codex created this isolated repository and its setup documents. No OddsEdge source code, production data, secrets, or previous implementation was copied. The scoped product idea derives from the owner's existing planning brief. Bob contributions will be recorded separately after actual work.
 
 See docs/SETUP.md for access verification and remaining event requirements, docs/BASELINE.md for the setup commit, and bob_sessions/README.md for evidence requirements.
+
+## Current progress
+
+Bob access and the isolated workspace are ready. Bob completed the first architecture proposal and one revision; [actual session evidence](bob_sessions/2026-09-26-architecture-session.md) is saved. Resolve the [remaining design review](docs/ARCHITECTURE-REVIEW.md) before implementation. This repository still contains no working prototype.
