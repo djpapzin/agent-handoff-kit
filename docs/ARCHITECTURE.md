@@ -1,115 +1,132 @@
-# Architecture Proposal — Agent Handoff Kit (revision 2)
+# Architecture Proposal — Agent Handoff Kit (revision 3)
 
 > **Design-only document.** Everything described here is a proposal for human
 > review. No application code exists; no behaviour described below has been
 > verified by tests or execution.
 >
-> **Revision notes (vs. revision 1):**
-> (C1) Action keys are now derived from stable logical identity, not claim-time
-> epoch — keys survive lease transfer and replay unchanged.
-> (C2) Claim/transfer guards now cover all non-terminal expired states
-> (PENDING, CLAIMED, RUNNING, CHECKPOINT), not just PENDING and CHECKPOINT.
-> (C3) Receipt insertion, existing-receipt verification, and lease validity are
-> all checked inside the same transaction; renewal cannot resurrect an expired
-> lease; external side effects are explicitly excluded from SQLite-level
-> exactly-once claims.
-> (C4) Input-hash mismatch is checked before any mutation to the existing job.
-> (C5) NEEDS_REVIEW requires verifiable reconciliation evidence, not
-> acknowledgement alone.
-> (C6) Transition table and clock section are corrected and extended; lease
-> timestamp is sampled after acquiring the write lock; forward/backward
-> wall-clock jump behaviour and same-owner expiry are described; unsupported
-> clock/rowid claims are removed.
-> (C7) Test cases are updated to expose the new fault classes.
+> **Revision notes (vs. revision 2):**
+> (R1) Action identity is the tuple `(job_id, step_id, full_input_hash)`;
+>   no prefix truncation; stable across all lease transfers, recovery, and
+>   replay without any reset/delete/recreate path.
+> (R2) Input-hash check runs inside `BEGIN IMMEDIATE` before any claim
+>   mutation or history write; mismatch rolls back everything.
+> (R3) Clock: one `time.time()` sample passed as a bound parameter after
+>   Python acquires the write lock; lease valid iff `expiry > now`,
+>   expired iff `expiry <= now`; `unixepoch()` dependency removed.
+> (R4) Every worker write checks owner + generation + active status + unexpired
+>   lease in the same WHERE clause; failed guards roll back all changes
+>   including history and receipt writes.
+> (R5) Steps are frozen: `validate → create_receipt → summarize`; exactly
+>   one business receipt produced by `create_receipt`.
+> (R6) Receipt, checkpoint, and history are always committed atomically;
+>   non-atomic combinations from older designs are rejected as legacy; any
+>   partial/inconsistent state fails closed to NEEDS_REVIEW.
+> (R7) Recovery requires complete, ordered checkpoint and full receipt
+>   identity/payload/result verification; progress never regresses.
+> (R8) DONE replay is read-only; no write path revisits a DONE job.
+> (R9) NEEDS_REVIEW is terminal in MVP; no external adapters exist; verdict
+>   + file/hash alone is insufficient evidence; only a clearly marked
+>   synthetic fixture (test-only) may demonstrate independently verified
+>   outcome; production reconcile is out of scope.
+> (R10) Heartbeat runs in the main loop (no thread); 30 s TTL / 10 s interval
+>   suffices for tiny local steps.
+> (R11) Operational-error/busy handling and rollback path are defined.
+> (R12) Contradictory claims and stale open questions removed.
 
 ---
 
-## 1. Scope recap
+## 1. Scope and fixed decisions
 
 One job, two local worker processes (A and B), one recovery path.  
 Stack: Python 3.9 standard library + SQLite 3 (shipped with CPython).  
-No third-party packages, no paid providers, no cloud.  
-Telegram integration is deferred; notes appear in §11.
+No third-party packages, no paid providers, no cloud, no threads, no Telegram
+(deferred).
+
+**Frozen step sequence**: `validate → create_receipt → summarize`.  
+`create_receipt` is the only step that produces the one business receipt per
+job. `validate` and `summarize` produce local-only receipts recording their
+execution but have no external business side effect.
+
+**Immutable job contract**: once a job row is created, `id` and `input_hash`
+never change. A deliberately different execution (different input) requires a
+distinct `job_id`. There is no delete, replace, or reassign path in this design.
 
 ---
 
 ## 2. Database schema
 
-One SQLite file: `handoff.db`.
+One SQLite file: `handoff.db`. Opened with `PRAGMA journal_mode=WAL` for
+concurrent read safety.
 
 ```sql
 -- 2.1  Jobs
 CREATE TABLE jobs (
     id           TEXT PRIMARY KEY,   -- stable, caller-assigned, e.g. "job-001"
-    input_hash   TEXT NOT NULL,      -- SHA-256 hex of the canonical input blob
+    input_hash   TEXT NOT NULL,      -- full SHA-256 hex of canonical JSON input
     status       TEXT NOT NULL
                  CHECK(status IN (
                    'PENDING','CLAIMED','RUNNING',
                    'CHECKPOINT','DONE','FAILED','NEEDS_REVIEW')),
     owner        TEXT,               -- worker id holding the lease, or NULL
-    lease_expiry REAL,               -- Unix timestamp (float); NULL when unclaimed
+    lease_expiry REAL,               -- Unix float (time.time()); NULL when unclaimed
     generation   INTEGER NOT NULL DEFAULT 0,
-                                     -- monotone fence counter; incremented on every
-                                     --   successful claim or transfer
-    checkpoint   TEXT,               -- JSON blob: last safely committed step state
-    step_cursor  TEXT,               -- name of the last completed step, or NULL
+                                     -- monotone fence counter; incremented on
+                                     --   every successful claim or expired takeover
+    checkpoint   TEXT,               -- JSON blob: last atomically committed step state
+    step_cursor  TEXT,               -- step_id of the last completed step, or NULL
     failure_msg  TEXT,               -- set on FAILED or NEEDS_REVIEW
-    evidence_ref TEXT,               -- JSON array of {path, sha256} objects
-    created_at   REAL NOT NULL,
-    updated_at   REAL NOT NULL
+    evidence_ref TEXT,               -- JSON array of {source, ref, sha256} objects
+    created_at   REAL NOT NULL,      -- time.time() at job creation
+    updated_at   REAL NOT NULL       -- time.time() at last mutation
 );
 
--- 2.2  Transition history (append-only; never updated or deleted)
+-- 2.2  Transition history (append-only; immutable after insert)
 CREATE TABLE history (
     seq          INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id       TEXT NOT NULL REFERENCES jobs(id),
-    from_status  TEXT,
+    from_status  TEXT,               -- NULL for initial PENDING creation
     to_status    TEXT NOT NULL,
-    worker       TEXT,
+    worker       TEXT,               -- NULL for operator-initiated transitions
     generation   INTEGER NOT NULL,
-    note         TEXT,
-    recorded_at  REAL NOT NULL
+    note         TEXT,               -- step_id, error message, or other context
+    recorded_at  REAL NOT NULL       -- same time.time() sample as jobs.updated_at
 );
 
 -- 2.3  Local action receipts (idempotency fence)
 CREATE TABLE receipts (
-    action_key   TEXT PRIMARY KEY,   -- deterministic key: see §8.1
+    action_key   TEXT PRIMARY KEY,   -- (job_id, step_id, input_hash) formatted as
+                                     --   "{job_id}:{step_id}:{input_hash_full}"
     job_id       TEXT NOT NULL REFERENCES jobs(id),
-    step_name    TEXT NOT NULL,
-    payload_hash TEXT NOT NULL,      -- SHA-256 of serialised action inputs
-    result       TEXT,               -- serialised result (NOT NULL after commit)
+    step_id      TEXT NOT NULL,      -- one of: validate, create_receipt, summarize
+    payload_hash TEXT NOT NULL,      -- full SHA-256 of the serialised step inputs
+    result       TEXT NOT NULL,      -- serialised step result; never NULL after commit
     committed_at REAL NOT NULL
 );
 ```
 
-### Append-only enforcement for `history`
+### 2.4 Append-only enforcement for `history`
 
-A SQLite `BEFORE UPDATE` and `BEFORE DELETE` trigger on `history` that raises
-an error is the preferred enforcement mechanism; application-layer checks alone
-are insufficient because the same database file may be opened by multiple
-processes or tools:
+Triggers enforce immutability at the database level, independent of the
+application layer:
 
 ```sql
 CREATE TRIGGER history_no_update
     BEFORE UPDATE ON history
-BEGIN
-    SELECT RAISE(ABORT, 'history rows are immutable');
-END;
+BEGIN SELECT RAISE(ABORT, 'history rows are immutable'); END;
 
 CREATE TRIGGER history_no_delete
     BEFORE DELETE ON history
-BEGIN
-    SELECT RAISE(ABORT, 'history rows are immutable');
-END;
+BEGIN SELECT RAISE(ABORT, 'history rows are immutable'); END;
 ```
 
-### Index hints (deferred until implementation)
+### 2.5 Index hints (deferred until implementation)
 
 ```sql
 CREATE INDEX ix_jobs_status       ON jobs(status);
-CREATE INDEX ix_jobs_expiry       ON jobs(lease_expiry) WHERE status NOT IN ('DONE','FAILED','NEEDS_REVIEW');
+CREATE INDEX ix_jobs_expiry       ON jobs(lease_expiry)
+    WHERE status NOT IN ('DONE','FAILED','NEEDS_REVIEW');
 CREATE INDEX ix_history_job       ON history(job_id, seq);
-CREATE INDEX ix_receipts_job_step ON receipts(job_id, step_name);
+CREATE INDEX ix_receipts_job_step ON receipts(job_id, step_id);
 ```
 
 ---
@@ -118,577 +135,724 @@ CREATE INDEX ix_receipts_job_step ON receipts(job_id, step_name);
 
 ```
               ┌──────────┐
-              │  PENDING │  (job created, or reset to restart)
+              │  PENDING │  (job created; also entered via create_job)
               └────┬─────┘
                    │ claim()
                    ▼
               ┌──────────┐
-              │  CLAIMED │  (lease held, no step executing yet)
+              │  CLAIMED │  (lease held; input verified; no step executing)
               └────┬─────┘
                    │ begin_step()
                    ▼
               ┌──────────┐
-              │  RUNNING │  (a step executing under current lease)
-              └──┬──┬────┘
-     checkpoint()│  │fail() / unknown_outcome()
-                 ▼  ▼────────────────────────────────────┐
-          ┌────────────┐                      ┌──────────────────┐
-          │ CHECKPOINT │                      │     FAILED /     │
-          └─────┬──────┘                      │  NEEDS_REVIEW    │
-                │ claim() on expired lease     └──────┬───────────┘
-                │ (any non-terminal expired           │ reconcile() with
-                │  state is claimable)                │ verifiable evidence
-                ▼                                     ▼
-             RUNNING ──── complete() ──────► DONE   PENDING (retry)
-                                                    DONE    (reconcile-done)
-                                                    FAILED  (reconcile-failed)
+              │  RUNNING │  (one step executing under current lease)
+              └──┬───────┘
+                 │ commit_step()  ────────────────────────────┐
+                 ▼                                            │ if next step exists
+           ┌────────────┐   complete() (all steps done)       │
+           │ CHECKPOINT │ ───────────────────────────► ┌──────▼──┐
+           └─────┬──────┘                              │  DONE   │ (terminal; read-only)
+                 │ claim() takeover (expiry <= now)     └─────────┘
+                 ▼
+              CLAIMED  → RUNNING → … (Worker B continues)
+
+    From RUNNING or CHECKPOINT, on guard failure or unknown outcome:
+              ┌──────────┐        ┌──────────────┐
+              │  FAILED  │        │ NEEDS_REVIEW │ (terminal in MVP)
+              └──────────┘        └──────────────┘
 ```
 
-### Transition table (complete)
+### 3.1 Transition table (complete)
 
-| From         | To           | Trigger               | Guards (all must hold)                                                   |
-|--------------|--------------|-----------------------|--------------------------------------------------------------------------|
-| PENDING      | CLAIMED      | `claim()`             | status = PENDING                                                         |
-| CLAIMED      | CLAIMED      | `claim()` (takeover)  | status = CLAIMED **and** lease_expiry < lock_time                        |
-| RUNNING      | CLAIMED      | `claim()` (takeover)  | status = RUNNING **and** lease_expiry < lock_time                        |
-| CHECKPOINT   | CLAIMED      | `claim()` (takeover)  | status = CHECKPOINT **and** lease_expiry < lock_time                     |
-| CLAIMED      | RUNNING      | `begin_step()`        | status = CLAIMED, owner = my_id, gen = my_gen, lease_expiry ≥ lock_time  |
-| RUNNING      | CHECKPOINT   | `checkpoint()`        | status = RUNNING, owner = my_id, gen = my_gen, lease_expiry ≥ lock_time  |
-| CHECKPOINT   | RUNNING      | `resume()`            | status = CHECKPOINT, owner = my_id, gen = my_gen, lease_expiry ≥ lock_time |
-| RUNNING      | DONE         | `complete()`          | status = RUNNING, owner = my_id, gen = my_gen, lease_expiry ≥ lock_time  |
-| RUNNING      | FAILED       | `fail()`              | status = RUNNING, owner = my_id, gen = my_gen, lease_expiry ≥ lock_time  |
-| RUNNING      | NEEDS_REVIEW | `unknown_outcome()`   | status = RUNNING, owner = my_id, gen = my_gen, lease_expiry ≥ lock_time  |
-| CHECKPOINT   | NEEDS_REVIEW | `schema_mismatch()`   | status = CHECKPOINT, owner = my_id, gen = my_gen, lease_expiry ≥ lock_time |
-| NEEDS_REVIEW | DONE         | `reconcile(verdict=done)`   | verifiable external evidence supplied; operator-initiated only     |
-| NEEDS_REVIEW | FAILED       | `reconcile(verdict=failed)` | verifiable external evidence supplied; operator-initiated only     |
-| NEEDS_REVIEW | PENDING      | `reconcile(verdict=retry)`  | verifiable external evidence supplied; operator-initiated only     |
-| FAILED       | PENDING      | `reset()`             | operator-initiated; no evidence requirement                              |
+| From         | To           | Trigger                   | Guards (all must hold inside `BEGIN IMMEDIATE`)                            |
+|--------------|--------------|---------------------------|----------------------------------------------------------------------------|
+| —            | PENDING      | `create_job()`            | job_id does not already exist                                              |
+| PENDING      | CLAIMED      | `claim()`                 | status = PENDING; input_hash verified = stored (see §4.1)                 |
+| CLAIMED      | CLAIMED      | `claim()` takeover        | status = CLAIMED **and** lease_expiry <= now                               |
+| RUNNING      | CLAIMED      | `claim()` takeover        | status = RUNNING **and** lease_expiry <= now                               |
+| CHECKPOINT   | CLAIMED      | `claim()` takeover        | status = CHECKPOINT **and** lease_expiry <= now                            |
+| CLAIMED      | RUNNING      | `begin_step()`            | status = CLAIMED, owner = my_id, gen = my_gen, lease_expiry > now          |
+| RUNNING      | CHECKPOINT   | `commit_step()` (not last)| status = RUNNING, owner = my_id, gen = my_gen, lease_expiry > now          |
+| RUNNING      | DONE         | `commit_step()` (last)    | status = RUNNING, owner = my_id, gen = my_gen, lease_expiry > now          |
+| CHECKPOINT   | RUNNING      | `begin_step()` (resume)   | status = CHECKPOINT, owner = my_id, gen = my_gen, lease_expiry > now       |
+| RUNNING      | FAILED       | `fail()`                  | status = RUNNING, owner = my_id, gen = my_gen, lease_expiry > now          |
+| RUNNING      | NEEDS_REVIEW | `unknown_outcome()`       | status = RUNNING, owner = my_id, gen = my_gen, lease_expiry > now          |
+| CHECKPOINT   | NEEDS_REVIEW | `schema_mismatch()`       | status = CHECKPOINT, owner = my_id, gen = my_gen, lease_expiry > now       |
+| CLAIMED      | FAILED       | `fail()` (mismatch)       | status = CLAIMED, owner = my_id, gen = my_gen, lease_expiry > now          |
+| FAILED       | PENDING      | `reset()`                 | operator-only; no evidence required                                        |
+| DONE         | —            | (none)                    | DONE is final; all accesses are read-only                                  |
+| NEEDS_REVIEW | —            | (none)                    | NEEDS_REVIEW is terminal in MVP; no automated path out                     |
 
-**lock_time** = the Unix timestamp captured *inside* the `BEGIN IMMEDIATE`
-transaction, after the write lock is acquired (see §4 and §10).
-
-**Terminal states awaiting operator action**: DONE (final), FAILED (requires
-`reset()`), NEEDS_REVIEW (requires `reconcile()` with evidence).  
-No automatic retry from any terminal state.
+**`now`** = the single `time.time()` float sampled in Python **after**
+`conn.execute("BEGIN IMMEDIATE")` returns without raising. It is passed as a
+bound parameter to all SQL statements in that transaction.  
+**Lease valid** iff `lease_expiry > now`.  
+**Lease expired** iff `lease_expiry <= now` (or `lease_expiry IS NULL`).
 
 ---
 
-## 4. Atomic claim, renewal, transfer, and checkpoint updates
+## 4. Transaction protocols
 
-All mutating operations are single SQLite `BEGIN IMMEDIATE` transactions.
-The generation column is the fencing token.
+All mutating operations use `BEGIN IMMEDIATE`. If SQLite raises
+`sqlite3.OperationalError` ("database is locked"), the caller backs off and
+retries up to a configurable limit before returning an error to the main loop.
+On any other exception, the Python `with conn:` context manager rolls back the
+entire transaction; no partial changes persist.
 
-### 4.1 Claim and takeover (unified)
+### 4.1 `create_job()`
 
-The same transaction covers fresh claims (PENDING) and expired-lease takeovers
-(CLAIMED, RUNNING, or CHECKPOINT whose `lease_expiry` has passed). The
-timestamp used in the expiry check is read **inside** the transaction after the
-write lock is acquired; this eliminates the race where a process reads
-`now()` outside the lock and the clock advances before the write.
-
+```python
+now = time.time()                        # before BEGIN IMMEDIATE is fine for
+                                         # creation; no concurrent expiry race
+conn.execute("BEGIN IMMEDIATE")
+conn.execute("""
+    INSERT INTO jobs(id, input_hash, status, generation, created_at, updated_at)
+    VALUES (?, ?, 'PENDING', 0, ?, ?)
+    """, (job_id, sha256_canonical_json(input_blob), now, now))
+conn.execute("""
+    INSERT INTO history(job_id, from_status, to_status, worker, generation,
+                        note, recorded_at)
+    VALUES (?, NULL, 'PENDING', NULL, 0, 'job created', ?)
+    """, (job_id, now))
+conn.commit()
 ```
-BEGIN IMMEDIATE;
 
--- Sample the authoritative timestamp under the write lock
-now = SELECT unixepoch('now','subsec');   -- or equivalent float
+`sha256_canonical_json(input_blob)` is the full 64-character hex SHA-256 of the
+UTF-8 bytes of the canonically serialised JSON input (keys sorted, no extra
+whitespace).
 
-SELECT id, generation AS old_gen, status AS old_status, lease_expiry
-  FROM jobs
- WHERE id = ?
-   AND (
-         status = 'PENDING'
-      OR (status IN ('CLAIMED','RUNNING','CHECKPOINT') AND lease_expiry < now)
-   );
--- If no row: abort (job does not exist, is terminal, or lease is still live)
+### 4.2 `claim()` — unified fresh claim and expired-lease takeover
+
+The input-hash check runs **inside** `BEGIN IMMEDIATE`, before any mutation.
+If the hash mismatches the transaction is rolled back without writing a single
+history row or altering the job row.
+
+```python
+now = None
+
+conn.execute("BEGIN IMMEDIATE")
+now = time.time()                        # sampled AFTER lock acquired
+
+row = conn.execute("""
+    SELECT generation, status, input_hash, lease_expiry
+      FROM jobs WHERE id = ?
+    """, (job_id,)).fetchone()
+
+if row is None:
+    conn.rollback(); raise JobNotFound
+
+stored_hash = row["input_hash"]
+presented_hash = sha256_canonical_json(presented_input)
+
+if presented_hash != stored_hash:
+    # Mismatch detected BEFORE any mutation; roll back entirely
+    conn.rollback()
+    raise InputHashMismatch(f"expected {stored_hash}, got {presented_hash}")
+
+st, old_gen, expiry = row["status"], row["generation"], row["lease_expiry"]
+
+claimable = (
+    st == "PENDING"
+    or (st in ("CLAIMED", "RUNNING", "CHECKPOINT") and expiry is not None and expiry <= now)
+)
+if not claimable:
+    conn.rollback(); raise NotClaimable(st)
 
 new_gen = old_gen + 1
 new_expiry = now + LEASE_TTL
 
-UPDATE jobs
-   SET status = 'CLAIMED',
-       owner  = my_id,
-       lease_expiry = new_expiry,
-       generation   = new_gen,
-       updated_at   = now
- WHERE id = ? AND generation = old_gen;   -- fencing guard
--- If rowcount != 1: abort (concurrent writer won)
+conn.execute("""
+    UPDATE jobs
+       SET status='CLAIMED', owner=?, lease_expiry=?, generation=?, updated_at=?
+     WHERE id=? AND generation=?
+    """, (my_id, new_expiry, new_gen, now, job_id, old_gen))
 
-INSERT INTO history(job_id, from_status, to_status, worker, generation, note, recorded_at)
-VALUES (?, old_status, 'CLAIMED', my_id, new_gen, NULL, now);
+if conn.execute("SELECT changes()").fetchone()[0] != 1:
+    conn.rollback(); raise FencingConflict   # concurrent writer won
 
-COMMIT;
--- Returns (new_gen, new_expiry) to caller as the lease token
+conn.execute("""
+    INSERT INTO history(job_id, from_status, to_status, worker, generation,
+                        note, recorded_at)
+    VALUES (?, ?, 'CLAIMED', ?, ?, NULL, ?)
+    """, (job_id, st, my_id, new_gen, now))
+conn.commit()
+return new_gen, new_expiry
 ```
 
-A calller holds the lease as long as it presents `(job_id, my_id, my_gen)` and
-`lease_expiry` has not passed at the time the next write lock is acquired.
+### 4.3 `renewal()`
 
-### 4.2 Renewal
+Renewal extends an unexpired lease. The `lease_expiry > now` guard prevents
+resurrecting an expired lease; a worker whose lease has lapsed must halt or
+re-claim.
 
-Renewal extends an **existing, unexpired** lease. It must not resurrect a lease
-that has already passed — a worker that has been paused longer than LEASE_TTL
-must re-claim (obtaining a new generation) rather than renew.
+```python
+conn.execute("BEGIN IMMEDIATE")
+now = time.time()
 
-```
-BEGIN IMMEDIATE;
+conn.execute("""
+    UPDATE jobs
+       SET lease_expiry=?, updated_at=?
+     WHERE id=? AND owner=? AND generation=?
+       AND status IN ('CLAIMED','RUNNING','CHECKPOINT')
+       AND lease_expiry > ?
+    """, (now + LEASE_TTL, now, job_id, my_id, my_gen, now))
 
-now = SELECT unixepoch('now','subsec');
-
-UPDATE jobs
-   SET lease_expiry = now + LEASE_TTL,
-       updated_at   = now
- WHERE id          = ?
-   AND owner       = my_id
-   AND generation  = my_gen
-   AND status      IN ('CLAIMED','RUNNING','CHECKPOINT')
-   AND lease_expiry >= now;   -- must still be live; no resurrection
-
--- If rowcount != 1: lease is expired or stolen; caller must halt
-COMMIT;
+if conn.execute("SELECT changes()").fetchone()[0] != 1:
+    conn.rollback(); raise LeaseExpiredOrStolen
+conn.commit()
 ```
 
-Workers renew on a heartbeat interval ≤ `LEASE_TTL / 3`.
+The main loop calls `renewal()` every `HEARTBEAT_INTERVAL` seconds (default
+10 s; `LEASE_TTL` default 30 s). No background thread is used; between steps
+the main loop handles renewal synchronously.
 
-### 4.3 Transfer
+### 4.4 `commit_step()` — atomic receipt + checkpoint/done + history
 
-Transfer is a claim where the takeover guard (`lease_expiry < now`) fires
-for CLAIMED or RUNNING, not only CHECKPOINT. The unified claim transaction
-in §4.1 handles this without a separate code path.
+This is the single path for recording a completed step. Receipt, job status
+change, and history row are committed in **one transaction**. There is no
+"receipt now, checkpoint later" path; that non-atomic pattern is prohibited.
 
-### 4.4 Guarded checkpoint
+```python
+action_key = f"{job_id}:{step_id}:{stored_input_hash}"   # full hash
 
-The local receipt insertion, checkpoint update, and history append are committed
-in a **single transaction** whenever possible — specifically when the receipt
-has not previously been committed (first run). This makes the local effect,
-checkpoint advance, and audit record atomic:
+conn.execute("BEGIN IMMEDIATE")
+now = time.time()
 
+# Full guard: owner, generation, status, unexpired lease
+row = conn.execute("""
+    SELECT 1 FROM jobs
+     WHERE id=? AND owner=? AND generation=? AND status='RUNNING'
+       AND lease_expiry > ?
+    """, (job_id, my_id, my_gen, now)).fetchone()
+if row is None:
+    conn.rollback(); raise GuardFailed
+
+# Attempt receipt insert
+try:
+    conn.execute("""
+        INSERT INTO receipts(action_key, job_id, step_id, payload_hash,
+                             result, committed_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """, (action_key, job_id, step_id, payload_hash, serialised_result, now))
+except sqlite3.IntegrityError:
+    # Receipt already exists → recovery path; see §5
+    conn.rollback()
+    return _recover_existing_receipt(conn, job_id, step_id, action_key,
+                                     payload_hash, my_id, my_gen)
+
+# Determine next status
+is_last_step = (step_id == LAST_STEP)   # LAST_STEP = "summarize"
+new_status = "DONE" if is_last_step else "CHECKPOINT"
+new_checkpoint = None if is_last_step else build_checkpoint_json(step_id)
+
+conn.execute("""
+    UPDATE jobs
+       SET status=?, checkpoint=?, step_cursor=?, updated_at=?
+     WHERE id=? AND owner=? AND generation=? AND status='RUNNING'
+       AND lease_expiry > ?
+    """, (new_status, new_checkpoint, step_id, now,
+          job_id, my_id, my_gen, now))
+
+if conn.execute("SELECT changes()").fetchone()[0] != 1:
+    conn.rollback(); raise GuardFailed
+
+conn.execute("""
+    INSERT INTO history(job_id, from_status, to_status, worker, generation,
+                        note, recorded_at)
+    VALUES (?, 'RUNNING', ?, ?, ?, ?, ?)
+    """, (job_id, new_status, my_id, my_gen, step_id, now))
+conn.commit()
 ```
-BEGIN IMMEDIATE;
 
-now = SELECT unixepoch('now','subsec');
+### 4.5 Recovery path — existing receipt found
 
--- Lease validity guard (inside the lock)
-SELECT 1 FROM jobs
- WHERE id = ? AND owner = my_id AND generation = my_gen
-   AND status = 'RUNNING' AND lease_expiry >= now;
--- If no row: abort
+Called when `commit_step()` encounters a UNIQUE conflict on `action_key`.
+Verifies the receipt is consistent before advancing the checkpoint; any
+inconsistency fails closed to NEEDS_REVIEW.
 
--- Attempt receipt insert (idempotent key)
-INSERT INTO receipts(action_key, job_id, step_name, payload_hash, result, committed_at)
-VALUES (?, ?, ?, ?, ?, now);
--- On UNIQUE conflict: see §6 (existing-receipt reconciliation path)
+```python
+def _recover_existing_receipt(conn, job_id, step_id, action_key,
+                               payload_hash, my_id, my_gen):
+    conn.execute("BEGIN IMMEDIATE")
+    now = time.time()
 
--- Advance checkpoint
-UPDATE jobs
-   SET status       = 'CHECKPOINT',
-       checkpoint   = new_cp_json,
-       step_cursor  = step_name,
-       updated_at   = now
- WHERE id = ? AND owner = my_id AND generation = my_gen AND status = 'RUNNING';
--- If rowcount != 1: abort
+    # Re-check lease/status guard under new lock
+    row = conn.execute("""
+        SELECT status, step_cursor, checkpoint FROM jobs
+         WHERE id=? AND owner=? AND generation=?
+           AND status IN ('RUNNING','CHECKPOINT') AND lease_expiry > ?
+        """, (job_id, my_id, my_gen, now)).fetchone()
+    if row is None:
+        conn.rollback(); raise GuardFailed
 
-INSERT INTO history(job_id, from_status, to_status, worker, generation, note, recorded_at)
-VALUES (?, 'RUNNING', 'CHECKPOINT', my_id, my_gen, step_name, now);
+    # Read existing receipt
+    r = conn.execute("""
+        SELECT payload_hash, result FROM receipts WHERE action_key=?
+        """, (action_key,)).fetchone()
 
-COMMIT;
+    if r is None:
+        # Receipt vanished between the UNIQUE error and this read — logic error
+        conn.rollback()
+        _fail_closed(conn, job_id, my_id, my_gen,
+                     "receipt disappeared during recovery")
+        return
+
+    # Verify identity: payload_hash must match
+    if r["payload_hash"] != payload_hash:
+        conn.rollback()
+        _fail_closed(conn, job_id, my_id, my_gen,
+                     f"receipt payload_hash mismatch on recovery for {step_id}")
+        return
+
+    # Verify the checkpoint is ordered — step_cursor must not be ahead of step_id
+    current_cursor = row["step_cursor"]
+    step_order = ["validate", "create_receipt", "summarize"]
+    if (current_cursor is not None
+            and step_order.index(current_cursor) >= step_order.index(step_id)):
+        # Progress would regress; checkpoint is already past this step
+        # (This step was already committed and checkpointed; skip normally)
+        conn.rollback()
+        return r["result"]   # caller uses this result without any DB write
+
+    # Advance checkpoint (receipt already committed; only checkpoint+history missing)
+    is_last = (step_id == "summarize")
+    new_status = "DONE" if is_last else "CHECKPOINT"
+    new_checkpoint = None if is_last else build_checkpoint_json(step_id)
+
+    conn.execute("""
+        UPDATE jobs SET status=?, checkpoint=?, step_cursor=?, updated_at=?
+         WHERE id=? AND owner=? AND generation=?
+           AND status IN ('RUNNING','CHECKPOINT') AND lease_expiry > ?
+        """, (new_status, new_checkpoint, step_id, now,
+              job_id, my_id, my_gen, now))
+
+    if conn.execute("SELECT changes()").fetchone()[0] != 1:
+        conn.rollback(); raise GuardFailed
+
+    conn.execute("""
+        INSERT INTO history(job_id, from_status, to_status, worker, generation,
+                            note, recorded_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (job_id, row["status"], new_status, my_id, my_gen,
+              f"recovered:{step_id}", now))
+    conn.commit()
+    return r["result"]
 ```
 
-When the receipt already exists (recovery path), the reconciliation procedure
-in §6 applies instead.
+### 4.6 `fail()` and `unknown_outcome()`
+
+Both use the same four-part guard: owner, generation, active status, unexpired
+lease. Both commit the job update and history row atomically.
+
+```python
+# fail() — known error, job is definitively failed
+conn.execute("BEGIN IMMEDIATE")
+now = time.time()
+conn.execute("""
+    UPDATE jobs SET status='FAILED', failure_msg=?, updated_at=?
+     WHERE id=? AND owner=? AND generation=?
+       AND status IN ('RUNNING','CLAIMED') AND lease_expiry > ?
+    """, (msg, now, job_id, my_id, my_gen, now))
+if conn.execute("SELECT changes()").fetchone()[0] != 1:
+    conn.rollback(); raise GuardFailed
+conn.execute("""
+    INSERT INTO history(job_id, from_status, to_status, worker, generation,
+                        note, recorded_at)
+    VALUES (?, ?, 'FAILED', ?, ?, ?, ?)
+    """, (job_id, current_status, my_id, my_gen, msg, now))
+conn.commit()
+
+# unknown_outcome() — outcome cannot be locally verified; terminal in MVP
+conn.execute("BEGIN IMMEDIATE")
+now = time.time()
+conn.execute("""
+    UPDATE jobs SET status='NEEDS_REVIEW', failure_msg=?, updated_at=?
+     WHERE id=? AND owner=? AND generation=?
+       AND status='RUNNING' AND lease_expiry > ?
+    """, (reason, now, job_id, my_id, my_gen, now))
+if conn.execute("SELECT changes()").fetchone()[0] != 1:
+    conn.rollback(); raise GuardFailed
+conn.execute("""
+    INSERT INTO history(job_id, from_status, to_status, worker, generation,
+                        note, recorded_at)
+    VALUES (?, 'RUNNING', 'NEEDS_REVIEW', ?, ?, ?, ?)
+    """, (job_id, my_id, my_gen, reason, now))
+conn.commit()
+```
+
+### 4.7 `_fail_closed()` — internal error path
+
+Any inconsistency detected during recovery transitions the job to NEEDS_REVIEW
+rather than FAILED, so that an operator must inspect before any retry:
+
+```python
+def _fail_closed(conn, job_id, my_id, my_gen, reason):
+    conn.execute("BEGIN IMMEDIATE")
+    now = time.time()
+    conn.execute("""
+        UPDATE jobs SET status='NEEDS_REVIEW', failure_msg=?, updated_at=?
+         WHERE id=? AND owner=? AND generation=?
+           AND status IN ('RUNNING','CLAIMED','CHECKPOINT') AND lease_expiry > ?
+        """, (reason, now, job_id, my_id, my_gen, now))
+    conn.execute("""
+        INSERT INTO history(job_id, from_status, to_status, worker, generation,
+                            note, recorded_at)
+        VALUES (?, ?, 'NEEDS_REVIEW', ?, ?, ?, ?)
+        """, (job_id, "?", my_id, my_gen, f"fail_closed: {reason}", now))
+    conn.commit()
+```
+
+### 4.8 `reset()` — operator path out of FAILED
+
+`reset()` transitions FAILED → PENDING, incrementing generation. It does not
+alter existing receipts or history rows. Because `job_id` and `input_hash` are
+immutable, the same action keys apply on the next claim; existing committed
+receipts will block re-execution of already-completed steps.
+
+```python
+conn.execute("BEGIN IMMEDIATE")
+now = time.time()
+conn.execute("""
+    UPDATE jobs SET status='PENDING', owner=NULL, lease_expiry=NULL,
+        generation=generation+1, failure_msg=NULL, updated_at=?
+     WHERE id=? AND status='FAILED'
+    """, (now, job_id))
+if conn.execute("SELECT changes()").fetchone()[0] != 1:
+    conn.rollback(); raise JobNotFailed
+conn.execute("""
+    INSERT INTO history(job_id, from_status, to_status, worker, generation,
+                        note, recorded_at)
+    VALUES (?, 'FAILED', 'PENDING', NULL, (SELECT generation FROM jobs WHERE id=?),
+            'operator reset', ?)
+    """, (job_id, job_id, now))
+conn.commit()
+```
 
 ---
 
 ## 5. Fencing and stale-write rejection
 
-Every mutating SQL statement includes `WHERE generation = my_gen` (and
-`owner = my_id` where applicable). Python's `cursor.rowcount` is checked
-immediately; zero means the lease was stolen or generation has advanced, and
-the calling worker **must halt** — it must not execute further steps, write
-additional receipts, or call any external side effect.
+Every mutating statement includes `owner = my_id`, `generation = my_gen`,
+and `lease_expiry > now` (the `now` sampled after lock acquisition). On
+rowcount = 0 the entire transaction is rolled back and the worker halts — it
+must not execute further steps, insert receipts, or trigger any side effect.
 
-**Stale write sequence:**
+**No window for dual success**: `BEGIN IMMEDIATE` acquires an exclusive write
+lock before `time.time()` is sampled; two concurrent writers cannot both
+observe rowcount = 1 for the same generation.
 
+**Stale write sequence (illustrative — untested):**
 ```
-Worker A:  claim → gen=1, expiry=T+30
-                         [A pauses for 40 s]
-                         Worker B: takeover → gen=2, expiry=T+70
-Worker A:  checkpoint(gen=1) → rowcount=0 → ABORT; Worker A halts
+Worker A: claim → gen=1, expiry=T+30
+                          [A pauses 40 s; lease expired at T+30]
+                          Worker B: takeover → gen=2, expiry=T+70
+Worker A: resumes; commit_step(gen=1)
+          → lease_expiry(T+30) <= now(T+40) → rowcount=0 → ROLLBACK; A halts
 ```
-
-Because `BEGIN IMMEDIATE` acquires the write lock before reading `now`, there
-is no window in which two concurrent writers both observe `rowcount=1` for the
-same generation.
 
 ---
 
-## 6. Guarded checkpoints and crash-safe replay
-
-### 6.1 Checkpoint JSON structure
+## 6. Checkpoint JSON structure and schema version
 
 ```json
 {
+  "schema_version": 1,
   "step_cursor": "validate",
-  "completed_steps": ["validate"],
-  "partial_output": null,
-  "schema_version": 1
+  "completed_steps": ["validate"]
 }
 ```
 
-`schema_version` allows future evolution. A worker reading an unknown version
-must call `schema_mismatch()` (→ NEEDS_REVIEW) rather than proceeding.
+`completed_steps` is the ordered list of all successfully committed steps so
+far. On recovery, the worker verifies that the checkpoint's `completed_steps`
+exactly matches the receipts present in the `receipts` table (same keys, same
+`payload_hash`, same `result`). Any discrepancy calls `_fail_closed()`.
 
-### 6.2 Action key stability across lease transfers
-
-Action keys are derived from stable logical identity — they **do not** embed
-claim-time or lease metadata. The format is:
-
-```
-{job_id}:{step_name}:{input_hash_prefix_8}
-```
-
-where `input_hash_prefix_8` is the first 8 hex characters of
-`jobs.input_hash`. This key is:
-
-- **stable** across recovery and replay: if Worker B picks up after Worker A,
-  it produces the identical key for the same step on the same input.
-- **unique per job+step+input** combination: a legitimately different input
-  (after `reset()` with a new input blob) yields a different `input_hash` and
-  therefore a different key, exposing any silent input substitution.
-- **disclosed**: any new run that intentionally uses a different input must
-  pass a new input blob through `create` and get a new `job_id`, not reuse
-  the existing job's identity.
-
-**Limitation**: this scheme does not distinguish two independent attempts at the
-same step on the same input (e.g. after `reset()` with identical input). If
-disambiguation of such re-runs is required, a `run_id` (UUID set at job-create
-time and preserved across lease transfers, reset on `reset()`) may be appended.
-This is listed as open question Q1.
-
-### 6.3 Crash between receipt-commit and checkpoint-commit
-
-This is the critical gap. If the receipt and checkpoint are committed in the
-same transaction (§4.4), this gap is closed for the common case. The gap only
-exists if a crash occurs partway through a transaction that could not be made
-fully atomic (e.g. a future multi-step batch). For the present single-step
-design, the combined transaction is preferred.
-
-Recovery path when the receipt already exists (UNIQUE fires on INSERT):
-
-```
-BEGIN IMMEDIATE;
-
-now = SELECT unixepoch('now','subsec');
-
--- Lease and status guard
-SELECT 1 FROM jobs
- WHERE id = ? AND owner = my_id AND generation = my_gen
-   AND status IN ('RUNNING','CLAIMED') AND lease_expiry >= now;
--- abort if no row
-
--- Read existing receipt
-SELECT payload_hash, result FROM receipts WHERE action_key = ?;
-
--- Verify payload hash matches current inputs
-IF existing.payload_hash != sha256(current_inputs):
-    -- The stored receipt was for different inputs under the same key.
-    -- This must not happen given the key includes input_hash_prefix;
-    -- treat as a logic error → transition to FAILED.
-    UPDATE jobs SET status='FAILED',
-        failure_msg='receipt payload_hash mismatch on replay: action_key collision',
-        updated_at=now
-     WHERE id=? AND owner=my_id AND generation=my_gen;
-    INSERT INTO history ...;
-    COMMIT;
-    ABORT caller;
-
--- payload_hash matches: safe to reuse result
-result = existing.result
-
--- Advance checkpoint using the recovered result
-UPDATE jobs SET status='CHECKPOINT', checkpoint=new_cp_json,
-    step_cursor=step_name, updated_at=now
- WHERE id=? AND owner=my_id AND generation=my_gen AND status IN ('RUNNING','CLAIMED');
-
-INSERT INTO history ...;
-COMMIT;
-```
-
-### 6.4 Prohibition on external side effects inside exactly-once claims
-
-The SQLite UNIQUE constraint on `receipts.action_key` guarantees that the
-**local database write** of the receipt is not repeated. It makes no guarantee
-about external calls (network, file system, OS signals). Workers must never
-treat the receipt guard as proof that an external side effect was or was not
-executed. Any step with an external side effect whose outcome cannot be verified
-locally must use `unknown_outcome()` (§9).
+A worker reading `schema_version` it does not recognise calls
+`schema_mismatch()` (→ NEEDS_REVIEW) before executing any step.
 
 ---
 
-## 7. Append-only transition history
+## 7. Action identity and idempotency
 
-`history` rows are never updated or deleted; this is enforced by the database
-triggers defined in §2. Every status change — including failed attempts that
-transition back to CLAIMED via takeover — writes exactly one history row within
-the same transaction as the jobs UPDATE. Workers never read history for control
-flow; it is observational only.
-
----
-
-## 8. Unique local action keys and input-hash mismatch rejection
-
-### 8.1 Action key format (revised — see also §6.2)
+### 7.1 Action key
 
 ```
-{job_id}:{step_name}:{input_hash_prefix_8}
+action_key = f"{job_id}:{step_id}:{input_hash_full}"
 ```
 
+`input_hash_full` is the full 64-character hex SHA-256 stored in `jobs.input_hash`.
 Examples:
-- `job-001:validate:a3f82c91`
-- `job-001:create_receipt:a3f82c91`
+```
+job-001:validate:a3f82c91d2e4b6f8a1c3e5d7f9b2d4e6f8a1c3e5d7f9b2d4e6f8a1c3e5d7f9b2
+job-001:create_receipt:a3f82c91d2e4b6f8a1c3e5d7f9b2d4e6f8a1c3e5d7f9b2d4e6f8a1c3e5d7f9b2
+job-001:summarize:a3f82c91d2e4b6f8a1c3e5d7f9b2d4e6f8a1c3e5d7f9b2d4e6f8a1c3e5d7f9b2
+```
 
-The key is deterministic and stable. It changes only if `jobs.input_hash`
-changes, which can only happen if the job is deleted and recreated with
-different input — the existing `jobs` row's `input_hash` is immutable after
-creation.
+The key is **stable across all lease transfers, crashes, and replays**:
+Worker B constructs the identical key from the same `job_id`, `step_id`, and
+the `input_hash` already stored in the `jobs` row. No claim-time or run-time
+metadata is embedded.
 
-### 8.2 Input-hash mismatch rejection (non-mutating check first)
+Because `job_id` and `input_hash` are immutable, a different input requires a
+distinct `job_id`; there is no ambiguity about which input produced a receipt.
 
-When a worker claims a job it **reads** `jobs.input_hash` from the row before
-calling `begin_step()`. It then computes `SHA-256(canonical(presented_input))`
-and compares. If the hashes differ:
+### 7.2 `payload_hash`
 
-1. **No mutation is made to the existing job row, its history, or its
-   receipts.** The original state is preserved intact.
-2. The worker logs a local error and aborts without calling `begin_step()`.
-3. The lease it already holds (from `claim()`) is left to expire naturally,
-   or the worker may call `fail()` to explicitly mark the job FAILED with the
-   mismatch message. Calling `fail()` does mutate the job, but only to FAILED —
-   it does not alter history rows prior to the claim, nor existing receipts.
-
-This prevents a scenario where a resumed worker silently processes a different
-input than the one the job was originally created with, while also preserving
-the complete audit trail of what happened before the mismatch was detected.
+`payload_hash` in `receipts` is the full SHA-256 of the serialised step-specific
+inputs (which may be a subset of the full job input). It is verified on recovery
+to confirm the existing receipt was produced by identical inputs. A mismatch
+indicates a logic error and fails closed to NEEDS_REVIEW.
 
 ---
 
-## 9. NEEDS_REVIEW for uncertain external outcomes
+## 8. Input-hash verification
 
-Any step with an external side effect whose outcome cannot be locally verified
-must call `unknown_outcome()` rather than `complete()` or `fail()`.
+The presented input blob is checked against `jobs.input_hash` **inside
+`BEGIN IMMEDIATE`**, before any UPDATE or INSERT. On mismatch the transaction
+is rolled back without writing a single byte to `jobs`, `history`, or
+`receipts`. This preserves the complete prior audit trail.
 
-```
-BEGIN IMMEDIATE;
-now = SELECT unixepoch('now','subsec');
-UPDATE jobs
-   SET status = 'NEEDS_REVIEW',
-       failure_msg = reason,
-       updated_at  = now
- WHERE id = ? AND owner = my_id AND generation = my_gen
-   AND status = 'RUNNING' AND lease_expiry >= now;
-INSERT INTO history ...;
-COMMIT;
-```
-
-A job in NEEDS_REVIEW is **never** auto-retried. Clearing NEEDS_REVIEW requires
-an operator-supplied `reconcile()` call that includes **verifiable evidence** of
-the external outcome — not an acknowledgement alone. Acceptable evidence forms
-(design intent; exact validation deferred):
-
-- A receipt or confirmation ID from the external system.
-- A file path + SHA-256 hash of an external log or response artifact.
-- An explicit `verdict` of `done`, `failed`, or `retry`.
-
-`reconcile()` stores the evidence in `jobs.evidence_ref` (as a JSON array of
-`{source, id_or_path, sha256}` objects) and transitions the job accordingly:
-
-| Verdict  | New status | Generation change |
-|----------|------------|-------------------|
-| `done`   | DONE       | unchanged         |
-| `failed` | FAILED     | unchanged         |
-| `retry`  | PENDING    | +1 (new action key scope for fresh claim) |
-
-**Bounded suppression claim**: the `receipts` table suppresses duplicate *local*
-database writes within this SQLite file. It makes no claim about suppressing
-duplicate calls to systems outside this database. If a step that reached
-NEEDS_REVIEW was an external call, there is no guarantee that the call did or
-did not execute; reconciliation evidence must come from the external system.
+The check is performed at claim time. Once a worker holds a CLAIMED lease it
+has already verified the hash; `begin_step()` does not re-read input from the
+caller (it reads from the checkpoint state).
 
 ---
 
-## 10. Clock assumptions and lease TTL
+## 9. Append-only transition history
 
-All timestamps use `unixepoch('now','subsec')` evaluated **inside the
-`BEGIN IMMEDIATE` transaction**, after SQLite has acquired the write lock.
-This is the `lock_time` referenced in the transition table. Using the
-in-transaction timestamp prevents a class of race conditions where a caller
-reads `time.time()` before the lock and the clock or lease state changes before
-the write.
+History rows are never updated or deleted (enforced by §2.4 triggers). Every
+status change writes exactly one history row in the same transaction as the
+`jobs` UPDATE. Workers never read history for control flow. The `seq` column
+provides a total order per job.
 
-**LEASE_TTL**: suggested 30 s for the demo. Heartbeat interval: ≤ 10 s
-(i.e. ≤ LEASE_TTL / 3). These are configurable parameters, not hard-coded
-constants.
-
-**Forward wall-clock jump** (e.g. NTP step-forward): a job's `lease_expiry`
-may suddenly appear already expired from the holder's perspective. On the next
-heartbeat the holder will see rowcount=0 and halt; another worker will claim.
-This is safe — the generation guard prevents the original holder from writing
-after the takeover.
-
-**Backward wall-clock jump** (e.g. NTP step-back): `now` inside the
-transaction may be less than a stored `lease_expiry`, causing a lease to appear
-unexpired when clock-wall time says otherwise. For a single-machine demo this
-is an edge case that should be documented as a known limitation. No mitigation
-is proposed at this stage.
-
-**Same-owner expiry**: if a worker's own lease_expiry has passed (perhaps it
-was paused), its next write will see rowcount=0 from the `lease_expiry >= now`
-guard. The worker must not re-extend its own expired lease via `renewal()`; it
-must use `claim()` (obtaining a new generation) or halt and let another worker
-take over. The renewal guard `AND lease_expiry >= now` enforces this.
-
-**No cross-process clock skew**: for the local single-machine demo both workers
-read the same OS clock. Clock skew is therefore zero in this design; the
-assumption must be revisited before any network distribution.
+Every path — including `_fail_closed()`, `schema_mismatch()`, recovery
+checkpoint advance, and operator `reset()` — writes a history row.
 
 ---
 
-## 11. Demo walkthrough (design-level)
+## 10. NEEDS_REVIEW: terminal in MVP
 
-The following describes the *intended* sequence; it has not been executed.
+**No external adapters exist in this MVP.** Any step that would call an
+external system is represented by a local synthetic function. If that function
+cannot produce a locally verifiable result, it raises `UnknownOutcomeError` and
+the job transitions to NEEDS_REVIEW.
+
+NEEDS_REVIEW is **terminal in this MVP**. There is no automated path out.
+The rationale: providing a verdict + file + hash is insufficient evidence
+without an external system to verify against; and no external system exists
+in this scope.
+
+**Synthetic fixture (test/demo only):** a specially marked test fixture may
+hard-code a pre-agreed outcome and call an internal `_synthetic_reconcile()`
+function that writes a DONE or FAILED transition with a fixture-generated
+evidence record. This path must be clearly labelled `# SYNTHETIC-FIXTURE-ONLY`
+and must never be reachable from the production CLI. It exists solely to
+demonstrate the DONE transition in an offline demo.
+
+**Future scope:** if a real external system is later integrated, reconcile
+requires independently verifiable evidence (external system receipt ID, signed
+response, or equivalent); merely supplying a local file hash is insufficient.
+
+Transitions removed from MVP:
+- `NEEDS_REVIEW → DONE` (production reconcile — no adapter)
+- `NEEDS_REVIEW → FAILED` (production reconcile — no adapter)
+- `NEEDS_REVIEW → PENDING` (production retry — no adapter)
+
+---
+
+## 11. Clock assumptions and lease TTL
+
+**Timestamp source**: `time.time()` in Python, called **once per
+transaction**, **after** `conn.execute("BEGIN IMMEDIATE")` returns. This float
+is passed as a bound parameter to all SQL statements in the transaction.
+No SQLite time functions are called; this avoids `unixepoch('now','subsec')`
+version dependency.
+
+**Validity convention**: lease valid iff `lease_expiry > now`;
+expired iff `lease_expiry <= now` (or `lease_expiry IS NULL`).
+
+**LEASE_TTL**: 30 s (configurable). **Heartbeat interval**: 10 s (configurable).
+The main loop renews synchronously between steps; no background thread.
+
+**Forward wall-clock jump** (e.g. NTP step-forward of Δ seconds): `now` inside
+the next transaction will be larger by Δ. If `now > lease_expiry`, the renewal
+guard fails → rowcount = 0 → worker halts. Another worker may then take over
+normally. This is safe: the generation fence prevents the original holder from
+writing after takeover.
+
+**Backward wall-clock jump** (e.g. NTP step-back of Δ seconds): `now` inside
+the next transaction will be smaller than expected. A lease that should have
+expired may appear live for up to Δ additional seconds. This is a known
+limitation for a single-machine demo; no NTP correction is expected during
+a short hackathon run. The generation fence still serialises DB writes; the
+risk is only that takeover is delayed, not that two workers both commit.
+
+**Same-owner expiry**: a paused worker's own `lease_expiry <= now` causes
+renewal to fail (rowcount = 0). It must halt or re-claim (new generation).
+Renewal never resurrects an expired lease.
+
+**No cross-process clock skew**: both workers read the same OS clock on the
+same machine; skew is zero for this design.
+
+**Fencing scope**: the generation counter serialises local database effects.
+It does not and cannot guarantee exactly-once execution of real-world actions
+outside the database.
+
+---
+
+## 12. Operational-error and rollback handling
+
+| Condition | Action |
+|-----------|--------|
+| `sqlite3.OperationalError: database is locked` | Retry with exponential back-off up to `MAX_RETRIES` (suggested: 5); then raise to main loop |
+| Any other exception inside a transaction | Python `with conn:` context rolls back automatically; worker logs error and halts the current step |
+| rowcount = 0 after guarded UPDATE | Rollback any partially written rows in same transaction; raise `GuardFailed`; worker halts |
+| `IntegrityError` on receipt INSERT | Triggers recovery path (§4.5); worker does not halt |
+| `InputHashMismatch` from `claim()` | Transaction already rolled back; worker calls `fail()` or lets lease expire |
+
+---
+
+## 13. Demo walkthrough (design-level; untested)
 
 ```
-Step 0:  Operator creates job
-         insert_job(job_id="job-001", input_blob=b"...", status='PENDING')
-         → input_hash = sha256(canonical(input_blob)) = "a3f82c91..."
-         → action_key prefix = "job-001:<step>:a3f82c91"
+Setup:    LEASE_TTL=30s, HEARTBEAT=10s
+          Steps: validate → create_receipt → summarize
+          Input: {"amount": 100, "currency": "ZAR"}  (canonical JSON, keys sorted)
+          input_hash = sha256('{"amount":100,"currency":"ZAR"}')
+                     = "b94f6f125..." (illustrative placeholder)
 
-Step 1:  Worker A claims
-         claim("job-001") → generation=1, lease_expiry=T+30
+Step D0:  create_job(job_id="job-001", input_blob=b'{"amount":100,"currency":"ZAR"}')
+          → jobs: id=job-001, input_hash=b94f6f125..., status=PENDING, gen=0
+          → history: seq=1 [NULL→PENDING, gen=0, "job created"]
 
-Step 2:  Worker A runs "validate" step
-         action_key = "job-001:validate:a3f82c91"
-         Transaction: INSERT receipts + UPDATE jobs(CHECKPOINT) + INSERT history
-         → all committed atomically
+Step D1:  Worker A: claim("job-001", presented_input=input_blob)
+          BEGIN IMMEDIATE; now=T0
+          hash check: sha256(presented)==b94f6f125... ✓
+          UPDATE jobs SET status=CLAIMED, owner=A, lease_expiry=T0+30, gen=1
+          history: seq=2 [PENDING→CLAIMED, gen=1, worker=A]
+          COMMIT
+          A holds: (gen=1, expiry=T0+30)
 
-Step 3:  Worker A simulates crash (process killed after step 2 commit)
-         lease_expiry passes after 30 s
+Step D2:  Worker A: begin_step("validate")
+          BEGIN IMMEDIATE; now=T1 (T1<T0+30; lease valid)
+          UPDATE jobs SET status=RUNNING ... WHERE gen=1 AND lease_expiry>T1
+          history: seq=3 [CLAIMED→RUNNING, gen=1, step=validate]
+          COMMIT
 
-Step 4:  Worker B polls, sees CHECKPOINT + lease_expiry < now
-         claim("job-001") → generation=2
+Step D3:  Worker A: commit_step("validate", result={"valid":true})
+          action_key = "job-001:validate:b94f6f125..."
+          payload_hash = sha256(serialise(validate_inputs))
+          BEGIN IMMEDIATE; now=T2
+          INSERT receipts (action_key, ..., result='{"valid":true}')  ← succeeds
+          UPDATE jobs SET status=CHECKPOINT, step_cursor=validate,
+              checkpoint='{"schema_version":1,"step_cursor":"validate","completed_steps":["validate"]}'
+          history: seq=4 [RUNNING→CHECKPOINT, gen=1, step=validate]
+          COMMIT
 
-Step 5:  Worker B reads checkpoint: step_cursor="validate"
-         Attempts "validate" again with action_key="job-001:validate:a3f82c91"
-         → UNIQUE fires → reads existing receipt → verifies payload_hash matches
-         → reuses result, advances cursor (no external call repeated)
+Step D4:  Worker A: [simulated crash]
+          lease expires at T0+30
 
-Step 6:  Worker B runs "create_receipt" step
-         action_key = "job-001:create_receipt:a3f82c91"
-         → new receipt inserted, checkpoint advanced to step_cursor="create_receipt"
+Step D5:  Worker B: polls; sees CHECKPOINT, lease_expiry=T0+30 <= now=T0+35
+          claim("job-001", presented_input=input_blob)
+          BEGIN IMMEDIATE; now=T0+35
+          hash check ✓; expiry T0+30 <= T0+35 → takeover
+          UPDATE jobs SET status=CLAIMED, owner=B, lease_expiry=T0+65, gen=2
+          history: seq=5 [CHECKPOINT→CLAIMED, gen=2, worker=B]
+          COMMIT
 
-Step 7:  Worker B runs "summarize" step → complete()
-         BEGIN IMMEDIATE; UPDATE jobs SET status='DONE' ... generation=2; COMMIT
+Step D6:  Worker B: reads checkpoint → completed_steps=["validate"]
+          Verifies receipt for (job-001, validate, b94f6f125...) exists and
+          payload_hash matches → checkpoint consistent
 
-Step 8:  Operator inspects
-         cli status job-001
-         → owner=worker-B, status=DONE, step_cursor=summarize, generation=2
-         history: PENDING→CLAIMED(gen1), CLAIMED→RUNNING(gen1),
-                  RUNNING→CHECKPOINT(gen1), CHECKPOINT→CLAIMED(gen2),
-                  CLAIMED→RUNNING(gen2), RUNNING→CHECKPOINT(gen2, create_receipt),
-                  CHECKPOINT→RUNNING(gen2), RUNNING→DONE(gen2)
+Step D7:  Worker B: begin_step("create_receipt")
+          BEGIN IMMEDIATE; UPDATE jobs SET status=RUNNING WHERE gen=2 AND expiry>now
+          history: seq=6 [CLAIMED→RUNNING, gen=2, step=create_receipt]
+          COMMIT
+
+Step D8:  Worker B: commit_step("create_receipt", result={"receipt_id":"R-42"})
+          action_key = "job-001:create_receipt:b94f6f125..."
+          INSERT receipts ← succeeds (first execution)
+          UPDATE jobs SET status=CHECKPOINT, step_cursor=create_receipt
+          history: seq=7 [RUNNING→CHECKPOINT, gen=2, step=create_receipt]
+          COMMIT
+
+Step D9:  Worker B: begin_step("summarize")
+          BEGIN IMMEDIATE; UPDATE jobs SET status=RUNNING ...
+          history: seq=8 [CHECKPOINT→RUNNING, gen=2, step=summarize]
+          COMMIT
+
+Step D10: Worker B: commit_step("summarize", result={"summary":"done"})
+          action_key = "job-001:summarize:b94f6f125..."
+          INSERT receipts ← succeeds
+          UPDATE jobs SET status=DONE, checkpoint=NULL, step_cursor=summarize
+          history: seq=9 [RUNNING→DONE, gen=2, step=summarize]
+          COMMIT
+
+Step D11: Operator: cli status job-001
+          status=DONE, owner=B, gen=2, step_cursor=summarize
+          receipts: 3 rows (validate, create_receipt, summarize)
+          history: 9 rows (D0–D10 above)
+          Further write attempts on this job are rejected (status=DONE, no
+          active transitions available).
 ```
 
 ---
 
-## 12. Fault-injection test cases
-
-These are acceptance criteria for a future test suite. None have been run.
+## 14. Fault-injection test cases (acceptance criteria; none executed)
 
 | # | Scenario | Setup | Expected outcome |
 |---|----------|-------|------------------|
-| T1 | **Process death before combined receipt+checkpoint transaction** | Worker A claims and begins a step but dies before the transaction commits | Job remains RUNNING, lease expires; Worker B takes over (gen+1), executes the step, receipt insert succeeds (no prior commit), checkpoint written atomically |
-| T2 | **Process death after combined receipt+checkpoint transaction** | Worker A commits the atomic receipt+checkpoint, then dies | Job in CHECKPOINT; Worker B takes over (gen+1), finds receipt via action key, verifies payload_hash, skips re-execution, advances from checkpoint cursor |
-| T3 | **Concurrent claimants on PENDING** | Two workers simultaneously call `claim()` on a PENDING job | Only one wins (exclusive write lock + generation guard); the other sees rowcount=0 and backs off |
-| T4 | **Concurrent claimants on expired RUNNING** | Two workers simultaneously detect expired RUNNING lease and call `claim()` | Same as T3 — only one succeeds; the other's fencing guard fires |
-| T5 | **Stale write after transfer** | Worker A resumes after long pause; Worker B already holds gen+1 | Worker A's next write (`lease_expiry >= now` and `generation = my_gen` both fail) → rowcount=0 → Worker A halts; Worker B undisturbed |
-| T6 | **Stale worker receipt attempt after takeover** | Worker A (expired) attempts to insert a receipt with its old gen | `BEGIN IMMEDIATE` lease guard fails (`lease_expiry < now` or wrong gen); receipt is not inserted; Worker A halts |
-| T7 | **Input hash mismatch at resume** | Job created with input X; Worker B presents input Y at `begin_step()` | Worker B detects hash mismatch before any step executes; original job row, history, and receipts are unmodified; Worker B aborts or calls `fail()` with mismatch message |
-| T8 | **Receipt replay with payload_hash verification** | Worker B recovers and finds an existing receipt for the step | Worker B reads receipt, verifies `payload_hash` matches current inputs; on match, reuses result; on mismatch, transitions to FAILED (logic error / collision) |
-| T9 | **Duplicate receipt across recovery** | Worker A commits receipt; Worker B (different gen) attempts the same action_key | UNIQUE fires; Worker B reads existing receipt, verifies hash, reuses result — no duplicate local execution |
-| T10 | **NEEDS_REVIEW path — no evidence** | Operator calls `reconcile()` with verdict but without verifiable evidence | Transition is rejected; job remains NEEDS_REVIEW; history row not written |
-| T11 | **NEEDS_REVIEW path — with evidence** | Operator supplies external confirmation ID + verdict=done | `reconcile()` stores evidence in `evidence_ref`, transitions to DONE, writes history row |
-| T12 | **Lease renewal keeps lease alive** | Worker A heartbeats within LEASE_TTL | `lease_expiry` advances; Worker B polling sees non-expired lease and does not attempt takeover |
-| T13 | **Renewal after expiry is rejected** | Worker A's lease passes; A calls `renewal()` | `AND lease_expiry >= now` guard fails → rowcount=0 → Worker A must halt; lease is not resurrected |
-| T14 | **Expired lease transfer from CLAIMED** | Worker A claims but never calls `begin_step()`; lease expires | Worker B detects expired CLAIMED, takes over (gen+1); Worker A's next renewal sees rowcount=0 and halts |
-| T15 | **Checkpoint schema version mismatch** | Checkpoint written with schema_version=2; recovering worker only understands version 1 | Worker calls `schema_mismatch()` → NEEDS_REVIEW with message "unknown checkpoint schema_version 2"; operator intervention required |
-| T16 | **History immutability** | Any process issues UPDATE or DELETE on a history row | Database trigger raises ABORT; write is rejected; history row unchanged |
-| T17 | **Reconcile NEEDS_REVIEW → PENDING (retry)** | Operator supplies evidence + verdict=retry | `generation` increments, status=PENDING; next claim produces a new generation; action keys are stable (same input_hash) so existing receipts still block re-execution of already-committed steps |
-| T18 | **Forward clock jump mid-lease** | OS clock steps forward 60 s while Worker A holds a 30 s lease | Worker A's next heartbeat reads `now` inside lock; `lease_expiry < now` → renewal guard fails → rowcount=0 → Worker A halts; Worker B may now take over |
-| T19 | **Same-owner expired lease write attempt** | Worker A pauses > LEASE_TTL; resumes and tries `checkpoint()` | `lease_expiry >= now` guard inside `BEGIN IMMEDIATE` fails → rowcount=0 → Worker A must re-claim (new gen) or halt |
+| T1 | **Crash before atomic commit** | Worker A begins `commit_step("validate")` but process dies before `COMMIT` | SQLite rolls back the partial transaction; job remains RUNNING; lease expires; Worker B takes over (gen+1); re-executes validate, commits atomically |
+| T2 | **Crash after atomic commit** | Worker A commits receipt+checkpoint for validate, then dies | Job in CHECKPOINT; Worker B takes over; recovery path verifies receipt identity/payload/result; skips re-execution; advances from checkpoint |
+| T3 | **Concurrent claimants on PENDING** | Two workers simultaneously call `claim()` | One wins (exclusive write lock); other sees `FencingConflict` (rowcount=0) and backs off |
+| T4 | **Concurrent claimants on expired RUNNING** | Both workers detect expired RUNNING and call `claim()` | Same as T3; generation guard fires |
+| T5 | **Stale write after takeover** | Worker A (expired gen=1) calls `commit_step()` after B holds gen=2 | `lease_expiry <= now` AND `generation` mismatch → rowcount=0 → ROLLBACK; A halts; B undisturbed |
+| T6 | **Expired owner receipt attempt** | Worker A (expired lease) calls `commit_step()` | `lease_expiry > now` guard fails inside `BEGIN IMMEDIATE`; receipt not inserted; transaction rolled back; A halts |
+| T7 | **Input hash mismatch at claim** | Worker presents input Y; job was created with input X (different hash) | `claim()` rolls back inside `BEGIN IMMEDIATE` before any mutation; job row, history, and receipts unchanged; `InputHashMismatch` raised |
+| T8 | **Receipt replay: payload_hash match** | Worker B recovers; existing receipt for validate found; payload_hash matches | Recovery advances checkpoint; result reused; no re-execution |
+| T9 | **Receipt replay: payload_hash mismatch** | Existing receipt has different payload_hash | `_fail_closed()` transitions to NEEDS_REVIEW; history row written; job halts |
+| T10 | **Duplicate receipt across recovery** | Worker A commits receipt; Worker B (new gen) attempts same action_key | UNIQUE fires; recovery path runs; hash verified; result reused; no duplicate execution |
+| T11 | **Checkpoint inconsistency: receipt missing** | Checkpoint lists validate as completed but no receipt row exists | Recovery detects missing receipt → `_fail_closed()` → NEEDS_REVIEW |
+| T12 | **Checkpoint inconsistency: result mismatch** | Receipt row exists but payload_hash differs from checkpoint expectation | `_fail_closed()` → NEEDS_REVIEW |
+| T13 | **Progress regression attempt** | Recovery worker tries to re-run a step already ahead in checkpoint cursor | `step_order.index(current_cursor) >= step_order.index(step_id)` check fires; no DB write; result returned from existing receipt |
+| T14 | **Lease renewal keeps lease alive** | Worker A heartbeats every 10 s | `lease_expiry` advances; Worker B sees live lease; does not attempt takeover |
+| T15 | **Renewal after expiry rejected** | Worker A pauses > 30 s; calls `renewal()` | `lease_expiry > now` guard fails → rowcount=0 → `LeaseExpiredOrStolen`; A must halt |
+| T16 | **Expired CLAIMED takeover** | Worker A claims but never calls `begin_step()`; lease expires | Worker B claims (gen+1); A's next renewal fails; B proceeds from CLAIMED |
+| T17 | **Checkpoint schema_version unknown** | Checkpoint has `schema_version=99` | Worker calls `schema_mismatch()` → NEEDS_REVIEW; history row written; operator must inspect |
+| T18 | **History immutability** | Any process issues UPDATE or DELETE on a history row | Trigger raises `ABORT`; write rejected; history unchanged |
+| T19 | **NEEDS_REVIEW is terminal** | Any code path attempts an automated transition out of NEEDS_REVIEW | No such transition exists in production code; only `_synthetic_reconcile()` (test fixture, unreachable from CLI) |
+| T20 | **Forward clock jump mid-lease** | OS clock steps forward Δ>30 s while A holds lease | A's next renewal: `now > lease_expiry` → rowcount=0 → A halts; B can take over |
+| T21 | **Same-owner expired write attempt** | Worker A pauses > TTL; resumes; calls `commit_step()` | `lease_expiry > now` guard fails inside `BEGIN IMMEDIATE`; rollback; A must re-claim or halt |
+| T22 | **DONE job is read-only** | Any worker calls a mutating function on a DONE job | No transition from DONE exists; guard `status IN (...)` excludes DONE; rowcount=0; no mutation |
+| T23 | **Operational error / database locked** | SQLite raises `OperationalError: database is locked` | Retry with back-off; after `MAX_RETRIES` exhausted, raise to main loop; job left in last stable state |
 
 ---
 
-## 13. CLI surface (design sketch)
+## 15. CLI surface (design sketch)
 
 All subcommands use `--db FILE` (default: `handoff.db` in CWD).
 
 ```
-cli.py create    --job-id JOB --input-file FILE
-cli.py claim     --job-id JOB --worker-id WORKER
-cli.py run       --job-id JOB --worker-id WORKER   # step loop + heartbeat + receipt guard
-cli.py status    --job-id JOB
-cli.py recover   --job-id JOB --worker-id WORKER   # claim on any expired non-terminal state
-cli.py reconcile --job-id JOB --verdict (done|failed|retry) --evidence-file FILE
-cli.py reset     --job-id JOB
-cli.py history   --job-id JOB [--last N]
+cli.py create   --job-id JOB --input-file FILE
+cli.py run      --job-id JOB --worker-id WORKER
+                # claim → step loop → heartbeat in main loop → commit steps
+cli.py status   --job-id JOB
+cli.py history  --job-id JOB [--last N]
+cli.py reset    --job-id JOB           # FAILED → PENDING (operator only)
 ```
 
-`reconcile` now requires `--evidence-file` (a JSON file containing the
-external evidence record). The file's SHA-256 is stored in `evidence_ref`.
+`reconcile` is removed from the production CLI in MVP (NEEDS_REVIEW is
+terminal). The `_synthetic_reconcile()` fixture is invoked only by test
+harnesses, never from the CLI.
 
 ---
 
-## 14. Open questions for human review
+## 16. What this document does not cover
 
-1. **run_id for same-input re-runs**: the current action key
-   `{job_id}:{step_name}:{input_hash_prefix_8}` cannot distinguish two
-   legitimate re-runs of the same step with identical input (e.g. after
-   `reset()` with the same input blob). Should a `run_id` UUID (set at
-   job-create time, reset on `reset()`) be appended to the key to allow this?
-2. **Step catalogue**: what are the exact named steps for the demo?
-   The walkthrough uses `validate`, `create_receipt`, `summarize` as
-   placeholders.
-3. **Lease TTL and heartbeat interval**: suggested 30 s / 10 s. Should
-   these be configurable via CLI flag (`--lease-ttl`, `--heartbeat`)?
-4. **Heartbeat thread vs. main thread**: using a daemon thread for renewal is
-   simpler but harder to test deterministically. A subprocess with its own
-   connection is testable but more complex. Which is preferred?
-5. **Evidence format for reconcile**: the design proposes a JSON file of
-   `{source, id_or_path, sha256}` objects. Should the CLI validate the
-   structure, or accept any non-empty JSON?
-6. **Reconcile authorisation**: any caller can reconcile in the local demo.
-   If Telegram is later added, only the numeric owner chat ID may reconcile.
-   Confirm scope before Telegram integration.
-7. **Evidence references on `jobs`**: `evidence_ref` is proposed as a JSON
-   array. Should it be a separate `evidence` table to avoid unbounded JSON
-   growth on jobs with many reconciliation cycles?
-8. **SQLite WAL mode**: `PRAGMA journal_mode=WAL` allows one writer and
-   multiple concurrent readers, reducing contention between `cli.py status`
-   and active workers. Worth enabling by default?
-9. **`unixepoch('now','subsec')` availability**: this SQLite function requires
-   SQLite ≥ 3.38.0. The Python 3.9.6 on this machine ships with SQLite; the
-   exact version should be verified at implementation time. Fallback:
-   pass `time.time()` as a bound parameter from Python rather than calling
-   the SQLite function.
-
----
-
-## 15. What this document does not cover
-
-- Application Python source code (not yet written).
-- Dependency installation (none planned; Python 3.9 stdlib only).
+- Application Python source code (not yet written; no code implemented).
+- Dependency installation (none planned; Python 3.9 stdlib + bundled SQLite).
 - Deployment, publishing, or submission.
-- Telegram integration (deferred; see §11 and open question Q6).
-- Production use or universal exactly-once external execution.  
-  The bounded suppression claim applies only to local SQLite writes within
-  this database for the transactional demo.
-- Prior Bob session evidence (none yet; first real session is this task).
+- Telegram integration (deferred; out of MVP scope).
+- Production use, distributed workers, or universal exactly-once external
+  execution — the design is for a single-machine transactional demo only.
+- Prior Bob session evidence (none yet; this task is the first real session).
