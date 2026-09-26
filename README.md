@@ -25,4 +25,4 @@ Bob access and the isolated workspace are ready. Bob completed the first archite
 The six architecture findings are now resolved in revision 4, consolidated by
 Codex from Bob's preserved revisions. See docs/ARCHITECTURE-REVIEW.md.
 Published submission requirements are recorded in docs/ORGANIZER-REQUIREMENTS.md;
-team/account checks still require lablab sign-in. Implementation remains unstarted.
+lablab sign-in and the Agent Handoff Kit solo team are verified; Discord access remains a separate check. Implementation remains unstarted.

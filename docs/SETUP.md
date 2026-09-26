@@ -29,8 +29,10 @@ ARCHITECTURE-REVIEW.md. No application code or runtime tests exist yet.
 
 The earlier unresolved public submission-format questions are now answered by
 the browser-readable rulebook and submission guide: public GitHub, interactive
-application URL, MP4 up to five minutes, PDF slides, cover and description
+application URL, event-specific MP4 up to three minutes (at least 90 seconds demonstration), PDF slides, cover and description
 fields. See ORGANIZER-REQUIREMENTS.md for the complete source-backed checklist.
 A local-only CLI is not sufficient. Existing-code reuse is avoided by design;
 no event-specific reuse permission is claimed. Authenticated lablab team,
 Discord access and final form inspection remain pending user sign-in.
+
+GitHub sign-in and lablab solo team creation verified on 26 September: Agent Handoff Kit, UTC+2, sole user member, membership closed. Authenticated submission step 1 inspected; no project submitted. See ORGANIZER-REQUIREMENTS.md for stricter event-specific media and statement limits.

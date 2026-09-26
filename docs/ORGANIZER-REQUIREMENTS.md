@@ -23,8 +23,8 @@ or all account checks are complete. No organizer message was sent.
 | Budget | 40 Bobcoins per participant; guide says no top-ups. Resumed architecture task displays 3.17 cumulative Bobcoins, not a current account-total reading. |
 | Public code | Rulebook requires public GitHub repository. Submission guide specifically asks for Bob-assisted files and relevant report/session evidence. No public repo exists yet; local commits are not uploaded. Follow event guide's consumption screenshots and preserve available task exports if used later. |
 | Interactive prototype | Rulebook requires application URL and lists Streamlit/Replit/Vercel; submission guide includes Replit for online code execution. Local CLI alone is insufficient under published guidance. Keep CLI core and plan a bounded online synthetic execution harness; no dashboard needed. Confirm chosen hosting mechanism before packaging. No exception granting local-only CLI was found. |
-| Video/slides/cover | Maximum 5-minute MP4 video; PDF slide presentation; PNG/JPG cover, use 16:9 to meet rulebook. Nothing produced yet. |
-| Submission fields | Descriptive title; short description up to 255 characters; long description at least 100 words; technology/category tags; repo and application links. Actual authenticated submission form still needs final inspection. |
+| Video/slides/cover | Event-specific maximum 3-minute MP4 video, with at least 90 seconds of the solution in action and narration; PDF slide presentation; PNG/JPG cover, use 16:9 to meet rulebook. Nothing produced yet. |
+| Submission fields | Descriptive title; short description 50–255 characters; title 5–50 characters; Problem & Solution Statement and separate IBM Bob Usage Statement each <=500 words and 500–4000 form characters; technology/category tags; repo and application links. Authenticated step 1 of 3 inspected; later media/link steps not yet inspected because the project is not built and no draft was filled. |
 | Judging | Presentation, business value, application of technology, originality. No numeric weights verified. |
 | Data | No client, company-confidential, personal, or social-media data. Public web data only with suitable commercial-use terms and source list. Project decision: generated synthetic fixtures only; no web dataset, personal data or OddsEdge source/data imported. Organizer research is documentation, not application data. |
 | Existing code | Event-specific reuse permission was not found. Fresh implementation, disclose pre-existing idea and Codex setup baseline. Avoid reuse rather than assume permission. No unresolved reuse dependency for this fresh scope. |
@@ -52,9 +52,50 @@ existing team, contact teammates, publish, or submit on assumption.
 Please confirm whether the IBM Bob 2.0 event accepts a Python/SQLite CLI
 prototype exposed through an interactive online execution environment (e.g.
 Replit) with synthetic fixtures, plus a public GitHub repository, Bob task
-summary PNGs, MP4 video under five minutes and PDF slides. Is a separate
+summary PNGs, MP4 video under three minutes with at least 90 seconds of working demo and PDF slides. Is a separate
 exported Bob report required in addition to the guide's screenshots? Is there
 an event-specific reuse policy to disclose a pre-existing idea and setup
 brief when all implementation is newly written during the event? We are
 using 27 September 15:00 UTC as the final submission cutoff; please flag any
 separate deadline.
+
+
+## Authenticated follow-up — 26 September, approximately 07:20 SAST
+
+GitHub sign-in succeeded in Safari using the existing lablab account. My Teams
+showed no ongoing team. Created the approved solo fallback as **Agent Handoff
+Kit**, UTC+2, membership closed, no invitations sent. Dashboard verifies the
+user as sole member and reports no project submission yet.
+
+- Team: https://lablab.ai/ai-hackathons/ibm-bob-2-hackathon/agent-handoff-kit
+- Submission form: https://lablab.ai/ai-hackathons/ibm-bob-2-hackathon/agent-handoff-kit/submission
+
+The authenticated event page fully loaded and materially supersedes the general
+five-minute video guidance: **maximum three minutes, at least 90 seconds of
+on-screen solution demonstration, MP4 with narration**, explicitly showing Bob
+usage. Both Problem & Solution and IBM Bob Usage statements must be <=500 words.
+The actual form additionally enforces title 5–50 characters, short description
+50–255 characters and each long/usage statement 500–4000 characters. Meet both
+word and character limits. Categories and technologies are required. Step 1
+was inspected only; no draft content or final submission was sent.
+
+Source: https://lablab.ai/ai-hackathons/ibm-bob-2-hackathon — What to submit,
+Important Requirements and Deliverable Details. This source also says submissions
+must be original and MIT-compliant. Record licensing suitability before publication;
+no licensing change or blanket reuse permission is inferred. The event explicitly
+says to build a new project, consistent with our fresh implementation decision.
+Deadline is directly displayed as **27 September, 17:00 SAST** (11:00 AM ET).
+
+Team-specific Discord channel creation requires at least two members with
+connected Discord, so it is unavailable to this solo team and does not justify
+adding someone merely to create a channel. General event Discord access is a
+separate verification item.
+
+This follow-up supersedes the earlier signed-out/team blocker and the generic
+five-minute limit above. Public repo and interactive prototype remain required;
+creation of the team is not project submission or publication of the code.
+
+Discord invite resolved to the existing-account login page in Safari, offering
+password, mobile QR or passkey. No authenticated Discord session is available;
+user must complete this authentication. No new Discord account or server
+membership was created, and no message was sent.
