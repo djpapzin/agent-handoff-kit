@@ -79,8 +79,9 @@ includes the task ID and consumption screenshot. No prior OddsEdge implementatio
 production data or secrets were copied.
 
 The local core and interactive web app are ready. The source is public at
-https://github.com/djpapzin/agent-handoff-kit under the MIT license. Render hosting
-is prepared, but the workspace monthly free-instance allowance is exhausted;
-paid compute has not been approved or deployed. Submission video/slides/statements
+https://github.com/djpapzin/agent-handoff-kit under the MIT license. Railway hosting
+is pending: after Render exhausted its free allowance, Railway also blocked new
+projects because the account free-plan resource limit is reached. No paid upgrade
+or public application deployment has been made. Submission video/slides/statements
 and final submission remain future work.
 [Organizer requirements](docs/ORGANIZER-REQUIREMENTS.md) record event-specific limits.

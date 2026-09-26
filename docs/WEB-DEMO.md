@@ -71,3 +71,14 @@ Browser error/warning log was empty. Layout inspected at 1440px and 390px;
 390px viewport had document scroll width 390px (no horizontal page overflow).
 Viewport restored after testing. UI screenshots are verification artifacts,
 not Bob session evidence.
+
+## Railway follow-up — 26 September 2026
+
+The user switched hosting to Railway. Existing GitHub sign-in succeeded. The
+workspace is on Free; selecting New was blocked by "Free plan resource provision
+limit exceeded. Please upgrade to provision more resources!" No new project or
+service was created. The account plans page offers Hobby at $5 minimum monthly
+usage, with $5 monthly credits and charges for extra resource usage. Upgrade and
+a maximum monthly budget were requested from the user; neither is yet approved.
+The existing Dockerfile uses PORT and binds 0.0.0.0; /healthz is ready for Railway.
+No runtime code changed and no new runtime verification is claimed.
