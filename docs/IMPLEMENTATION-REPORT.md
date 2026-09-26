@@ -59,3 +59,9 @@ represented as a fully completed Bob-only implementation.
 Package the same synthetic scenario behind a bounded interactive application URL,
 then prepare publication/submission artifacts. No hosting, public repo, video,
 slides or submission has been created by this core implementation task.
+
+## Web packaging follow-up
+
+Codex added the interactive web wrapper after core acceptance. The complete
+suite now passes 109 tests; real browser execution also passed. See WEB-DEMO.md.
+Public hosting and publication remain pending hosting-account selection.

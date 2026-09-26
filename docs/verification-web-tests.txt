@@ -1,0 +1,142 @@
+test_competing_claimants_pending_and_all_expired_states (test_codex_review.RealProcessRegressions) ... ok
+test_crash_before_and_after_every_commit (test_codex_review.RealProcessRegressions) ... ok
+test_clock_exception_rolls_back_transaction (test_codex_review.ReviewRegressions) ... ok
+test_done_run_is_logically_read_only (test_codex_review.ReviewRegressions) ... ok
+test_genuine_lock_retry_and_post_lock_clock (test_codex_review.ReviewRegressions) ... ok
+test_malformed_checkpoint_is_held_without_guessing (test_codex_review.ReviewRegressions) ... ok
+test_mismatch_active_expired_and_done_leaves_every_table_unchanged (test_codex_review.ReviewRegressions) ... ok
+test_schema_rejects_infinite_active_lease (test_codex_review.ReviewRegressions) ... ok
+test_status_missing_database_does_not_create_one (test_codex_review.ReviewRegressions) ... ok
+test_uncertain_commit_halts_and_observes_both_outcomes (test_codex_review.ReviewRegressions) ... ok
+test_unknown_schema_rejected_without_any_file_write (test_codex_review.ReviewRegressions) ... ok
+test_inf_clock_rejected (test_handoff.TestClockInjection) ... ok
+test_nan_clock_rejected (test_handoff.TestClockInjection) ... ok
+test_negative_inf_rejected (test_handoff.TestClockInjection) ... ok
+test_exactly_one_claim_event (test_handoff.TestConcurrentClaims) ... ok
+test_exactly_one_winner (test_handoff.TestConcurrentClaims) ... ok
+test_winner_generation_is_one (test_handoff.TestConcurrentClaims) ... ok
+test_hash_result_64_lowercase (test_handoff.TestDeterministicSteps) ... ok
+test_receipt_stable (test_handoff.TestDeterministicSteps) ... ok
+test_summarize_stable (test_handoff.TestDeterministicSteps) ... ok
+test_validate_stable (test_handoff.TestDeterministicSteps) ... ok
+test_history_unchanged (test_handoff.TestDuplicateJobId) ... ok
+test_new_job_same_input_is_independent (test_handoff.TestDuplicateJobId) ... ok
+test_raises_already_exists (test_handoff.TestDuplicateJobId) ... ok
+test_status_unchanged (test_handoff.TestDuplicateJobId) ... ok
+test_exact_expiry_is_expired (test_handoff.TestExpiryBoundary) ... ok
+test_one_ms_before_expiry_is_live (test_handoff.TestExpiryBoundary) ... ok
+test_done_checkpoint_all_steps (test_handoff.TestHappyPath) ... ok
+test_done_owner_lease_null (test_handoff.TestHappyPath) ... ok
+test_done_replay (test_handoff.TestHappyPath) ... ok
+test_full_run_done (test_handoff.TestHappyPath) ... ok
+test_history_has_create_claim_commit_done (test_handoff.TestHappyPath) ... ok
+test_receipt_count_one (test_handoff.TestHappyPath) ... ok
+test_cannot_change_job_input (test_handoff.TestImmutableConstraints) ... ok
+test_cannot_delete_history (test_handoff.TestImmutableConstraints) ... ok
+test_cannot_delete_job (test_handoff.TestImmutableConstraints) ... ok
+test_cannot_delete_receipt (test_handoff.TestImmutableConstraints) ... ok
+test_cannot_update_history (test_handoff.TestImmutableConstraints) ... ok
+test_cannot_update_receipt (test_handoff.TestImmutableConstraints) ... ok
+test_mismatch_no_history_added (test_handoff.TestInputHashMismatch) ... ok
+test_mismatch_no_status_change (test_handoff.TestInputHashMismatch) ... ok
+test_mismatch_not_failed (test_handoff.TestInputHashMismatch) ... ok
+test_mismatch_on_done_replay (test_handoff.TestInputHashMismatch) ... ok
+test_mismatch_on_done_replay_no_write (test_handoff.TestInputHashMismatch) ... ok
+test_mismatch_on_pending_raises (test_handoff.TestInputHashMismatch) ... ok
+test_bool_schema_version (test_handoff.TestInputValidation) ... ok
+test_canonical_hash_stable_across_key_order (test_handoff.TestInputValidation) ... ok
+test_duplicate_keys (test_handoff.TestInputValidation) ... ok
+test_hash_is_64_lowercase_hex (test_handoff.TestInputValidation) ... ok
+test_trailing_newline_rejected (test_handoff.TestInputValidation)
+fullmatch rejects trailing whitespace in task/artifact. ... ok
+test_unknown_field (test_handoff.TestInputValidation) ... ok
+test_wrong_version (test_handoff.TestInputValidation) ... ok
+test_renewal_adds_heartbeat_event (test_handoff.TestLeaseRenewal) ... ok
+test_renewal_after_expiry_fails (test_handoff.TestLeaseRenewal) ... ok
+test_renewal_extends (test_handoff.TestLeaseRenewal) ... ok
+test_renewal_monotonic_backward_clock (test_handoff.TestLeaseRenewal)
+Backward-clock: expiry must not shrink. ... ok
+test_bool_version_raises (test_handoff.TestLoadCheckpoint) ... ok
+test_duplicate_keys_raises (test_handoff.TestLoadCheckpoint) ... ok
+test_invalid_json_raises (test_handoff.TestLoadCheckpoint) ... ok
+test_missing_completed_steps_raises (test_handoff.TestLoadCheckpoint) ... ok
+test_non_object_raises (test_handoff.TestLoadCheckpoint) ... ok
+test_body_exception_rolls_back (test_handoff.TestLockContention)
+Exception in body rolls back, leaving DB unchanged. ... ok
+test_non_lock_error_not_retried (test_handoff.TestLockContention)
+An unrecognised OperationalError propagates immediately. ... ok
+test_failed_inspect_only (test_handoff.TestMarkFailed) ... ok
+test_mark_failed_stale_raises (test_handoff.TestMarkFailed) ... ok
+test_mark_failed_transitions (test_handoff.TestMarkFailed) ... ok
+test_bad_checkpoint_bool_version_holds (test_handoff.TestNeedsReview) ... ok
+test_bad_checkpoint_version_holds (test_handoff.TestNeedsReview) ... ok
+test_extra_results_map_entry_holds (test_handoff.TestNeedsReview)
+Extra key in checkpoint results that isn't in completed_steps → NEEDS_REVIEW. ... ok
+test_malformed_checkpoint_json_holds (test_handoff.TestNeedsReview)
+Non-JSON checkpoint_json causes hold on begin_step. ... ok
+test_malformed_receipt_result_json_holds (test_handoff.TestNeedsReview)
+Receipt with bad result_json causes hold on begin_step of summarize. ... ok
+test_needs_review_terminal_no_claim (test_handoff.TestNeedsReview) ... ok
+test_receipt_ahead_of_checkpoint_holds (test_handoff.TestNeedsReview) ... ok
+test_unknown_outcome_stays_held (test_handoff.TestNeedsReview) ... ok
+test_commit_wrong_step_raises (test_handoff.TestOutOfOrder)
+commit_step when active_step differs raises InvalidStep (no mutation). ... ok
+test_wrong_order_no_mutation (test_handoff.TestOutOfOrder) ... ok
+test_wrong_order_raises (test_handoff.TestOutOfOrder) ... ok
+test_death_after_receipt_insert_atomic_rollback (test_handoff.TestProcessDeath)
+Death after receipt INSERT but before job UPDATE (after_receipt_insert phase). ... ok
+test_death_before_commit_receipt (test_handoff.TestProcessDeath)
+Death before_commit during create_receipt: no receipt committed. ... ok
+test_death_before_commit_summarize (test_handoff.TestProcessDeath)
+Death before_commit during summarize: job resumes from summarize. ... ok
+test_death_before_commit_validate (test_handoff.TestProcessDeath) ... ok
+test_death_before_receipt_insert (test_handoff.TestProcessDeath)
+Death before receipt INSERT: receipt must not exist after death. ... ok
+test_recovery_skips_completed_steps (test_handoff.TestProcessDeath)
+A completes validate, dies before create_receipt commit. ... ok
+test_unknown_version_raises_no_write (test_handoff.TestSchemaVersion)
+Write version=99 directly, then open_and_init must raise without tables. ... ok
+test_stale_begin_no_history (test_handoff.TestStaleOwner) ... ok
+test_stale_begin_step_raises (test_handoff.TestStaleOwner) ... ok
+test_stale_commit_no_mutation (test_handoff.TestStaleOwner)
+Stale worker's commit attempt is rejected; no table change. ... ok
+test_stale_fail_raises (test_handoff.TestStaleOwner) ... ok
+test_stale_hold_raises (test_handoff.TestStaleOwner) ... ok
+test_stale_renew_raises (test_handoff.TestStaleOwner) ... ok
+test_done_cannot_be_claimed (test_handoff.TestTerminalStates) ... ok
+test_done_next_action_replay (test_handoff.TestTerminalStates) ... ok
+test_done_run_job_returns_verified_done (test_handoff.TestTerminalStates) ... ok
+test_needs_review_inspect_only (test_handoff.TestTerminalStates) ... ok
+test_repeated_replay_read_only (test_handoff.TestTerminalStates) ... ok
+test_a_stops_after_receipt_b_finishes (test_handoff.TestTwoWorkerRecovery) ... ok
+test_history_two_generations (test_handoff.TestTwoWorkerRecovery) ... ok
+test_one_receipt_after_two_worker_run (test_handoff.TestTwoWorkerRecovery) ... ok
+test_replay_after_two_worker_run (test_handoff.TestTwoWorkerRecovery) ... ok
+test_empty_worker_id_raises (test_handoff.TestWorkerIdTTLValidation) ... ok
+test_heartbeat_ge_ttl_raises (test_handoff.TestWorkerIdTTLValidation) ... ok
+test_inf_ttl_raises (test_handoff.TestWorkerIdTTLValidation) ... ok
+test_non_positive_ttl_raises (test_handoff.TestWorkerIdTTLValidation) ... ok
+test_assets_and_health (test_web.WebTests) ... 127.0.0.1 - - [26/Sep/2026 14:05:37] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [26/Sep/2026 14:05:37] "GET /style.css HTTP/1.1" 200 -
+127.0.0.1 - - [26/Sep/2026 14:05:37] "GET /app.js HTTP/1.1" 200 -
+127.0.0.1 - - [26/Sep/2026 14:05:37] "GET /healthz HTTP/1.1" 200 -
+127.0.0.1 - - [26/Sep/2026 14:05:37] "GET /../AGENTS.md HTTP/1.1" 404 -
+ok
+test_busy_capacity_rejects_without_running (test_web.WebTests) ... 127.0.0.1 - - [26/Sep/2026 14:05:37] "POST /api/run HTTP/1.1" 429 -
+ok
+test_failure_releases_capacity_and_hides_internal_details (test_web.WebTests) ... 127.0.0.1 - - [26/Sep/2026 14:05:38] "POST /api/run HTTP/1.1" 500 -
+ok
+test_only_fixed_empty_post_can_execute (test_web.WebTests) ... 127.0.0.1 - - [26/Sep/2026 14:05:38] "GET /api/run HTTP/1.1" 404 -
+127.0.0.1 - - [26/Sep/2026 14:05:38] "POST /api/run HTTP/1.1" 400 -
+127.0.0.1 - - [26/Sep/2026 14:05:38] "POST /api/run HTTP/1.1" 403 -
+127.0.0.1 - - [26/Sep/2026 14:05:38] "POST /api/run HTTP/1.1" 200 -
+ok
+test_real_scenario_repeated_isolation (test_web.WebTests) ... 127.0.0.1 - - [26/Sep/2026 14:05:41] "POST /api/run HTTP/1.1" 200 -
+127.0.0.1 - - [26/Sep/2026 14:05:43] "POST /api/run HTTP/1.1" 200 -
+ok
+test_timeout_kills_process_group (test_web.WebTests) ... ok
+
+----------------------------------------------------------------------
+Ran 109 tests in 9.268s
+
+OK

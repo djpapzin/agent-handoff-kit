@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Agent Handoff Kit — pick up where work stopped</title><link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script></head>
+<body>
+<header class="topbar"><a class="brand" href="/"><span class="brand-icon" aria-hidden="true">↗</span> agent handoff kit</a><span class="tag">IBM BOB HACKATHON <span>2026</span></span></header>
+<main>
+<section class="intro"><div class="eyebrow"><span class="dot"></span> A SMALL DEMO OF DURABLE WORK</div><h1>A worker stops.<br><span>The work doesn’t.</span></h1><div class="intro-bottom"><p>Kill a worker mid-task. Let a replacement pick up from its last checkpoint. Keep the action that already happened.</p><div class="built"><span class="brackets">{ }</span><div>Built with IBM Bob<br><span>Reviewed and verified with Codex</span></div></div></div></section>
+<section class="workspace" aria-labelledby="scenario-title">
+<div class="scenario-bar"><div><div class="eyebrow small">THE SCENARIO</div><h2 id="scenario-title">One task. Two workers. One receipt.</h2></div><span class="fixture">SYNTHETIC INPUT <span>sample.txt</span></span></div>
+<div class="flow">
+<article class="node"><div class="node-head"><span class="step-number">01</span><span class="node-status" id="a-state">WAITING</span></div><div class="worker-symbol">A<span>↗</span></div><h3>Make progress</h3><p>Worker A validates the task and commits a receipt with its checkpoint.</p><div class="node-foot">Save the completed work</div></article>
+<div class="connector" aria-hidden="true">→</div>
+<article class="node interruption"><div class="node-head"><span class="step-number">02</span><span class="node-status" id="kill-state">WAITING</span></div><div class="worker-symbol interrupt-symbol">Ⅱ</div><h3>Interrupt the worker</h3><p>A real process kill stops worker A. Its ownership lease expires.</p><div class="node-foot">The checkpoint survives</div></article>
+<div class="connector" aria-hidden="true">→</div>
+<article class="node"><div class="node-head"><span class="step-number">03</span><span class="node-status" id="b-state">WAITING</span></div><div class="worker-symbol">B<span>↗</span></div><h3>Resume what’s left</h3><p>Worker B takes over, verifies the saved work, and finishes the summary.</p><div class="node-foot">No second receipt</div></article>
+</div>
+<div class="run-bar"><div class="run-copy"><span class="run-light" id="run-light"></span><div><strong id="run-label">Ready when you are.</strong><p id="run-detail">Each run uses a fresh database and real worker processes.</p></div></div><button id="run-button" type="button">Run the recovery demo <span aria-hidden="true">↗</span></button></div>
+<p class="announcement" role="status" aria-live="polite" id="announcement"></p>
+</section>
+<section class="results" aria-labelledby="results-title"><div class="section-heading"><h2 id="results-title">The proof is in the record.</h2><span id="run-id">NO RUN YET</span></div>
+<div class="metrics"><div><span class="metric-label">BUSINESS RECEIPTS</span><strong id="receipt-count">—</strong><p>One committed action</p></div><div><span class="metric-label">FINAL STATE</span><strong id="final-state">—</strong><p>Replacement worker finishes</p></div><div><span class="metric-label">REPLAY CHECK</span><strong id="replay-state">—</strong><p>All durable records unchanged</p></div><div><span class="metric-label">TOTAL RUN TIME</span><strong id="elapsed">—</strong><p>Includes lease expiry and startup</p></div></div>
+<div class="evidence-grid"><article class="history-card"><div class="card-title"><h3>Event history</h3><span id="event-count">APPEND-ONLY</span></div><div id="empty-history" class="empty"><span aria-hidden="true">≡</span><p>Run the demo to see the handoff.<small>The entries below will come from the actual database.</small></p></div><div class="table-scroll" id="history-wrap" hidden><table><thead><tr><th>#</th><th>Event / step</th><th>Generation</th><th>State</th></tr></thead><tbody id="history-body"></tbody></table></div></article>
+<article class="receipt-card"><div class="card-title"><h3>The receipt</h3><span>JSON</span></div><pre id="receipt-json">// No receipt yet.
+// The committed result will appear here.</pre><div class="receipt-note"><span aria-hidden="true">↳</span> A checkpoint remembers what finished.<br>A receipt proves the local action committed.</div><button id="download" class="text-button" type="button" disabled>Download run evidence <span aria-hidden="true">↓</span></button></article></div>
+</section>
+<aside class="boundary"><span class="boundary-icon" aria-hidden="true">i</span><p><strong>Small scope. Explicit guarantees.</strong> This demonstrates duplicate suppression inside one local SQLite database. It does not claim exactly-once execution for external APIs. Unknown outcomes are held for review.</p><span class="technology">PYTHON · SQLITE · REAL PROCESSES</span></aside>
+</main><footer><span>Agent Handoff Kit</span><span>Progress worth keeping.</span></footer>
+</body></html>
