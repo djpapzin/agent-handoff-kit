@@ -20,3 +20,17 @@ Event-specific prior-code policy remains unverified. Decision for this workspace
 Still confirm official lablab event team membership (distinct from the IBM Bob entitlement team), Discord channel access, event-specific submission format, CLI acceptability, repository visibility, and final cutoff. General guide requires an online-usable prototype, video and pitch deck: https://lablab.ai/guide . No submission or registration is performed here.
 
 Implementation, deployment and public publication are outside this setup step. First Bob task is architecture only and must stop for review.
+
+## 26 September follow-up
+
+The architecture findings have been resolved in Codex-consolidated revision 4,
+after preserving Bob revision 3 and its actual session evidence. See
+ARCHITECTURE-REVIEW.md. No application code or runtime tests exist yet.
+
+The earlier unresolved public submission-format questions are now answered by
+the browser-readable rulebook and submission guide: public GitHub, interactive
+application URL, MP4 up to five minutes, PDF slides, cover and description
+fields. See ORGANIZER-REQUIREMENTS.md for the complete source-backed checklist.
+A local-only CLI is not sufficient. Existing-code reuse is avoided by design;
+no event-specific reuse permission is claimed. Authenticated lablab team,
+Discord access and final form inspection remain pending user sign-in.

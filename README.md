@@ -18,4 +18,11 @@ See docs/SETUP.md for access verification and remaining event requirements, docs
 
 ## Current progress
 
-Bob access and the isolated workspace are ready. Bob completed the first architecture proposal and one revision; [actual session evidence](bob_sessions/2026-09-26-architecture-session.md) is saved. Resolve the [remaining design review](docs/ARCHITECTURE-REVIEW.md) before implementation. This repository still contains no working prototype.
+Bob access and the isolated workspace are ready. Bob completed the first architecture proposal and one revision; [actual session evidence](bob_sessions/2026-09-26-architecture-session.md) is saved. The [design review](docs/ARCHITECTURE-REVIEW.md) is resolved in revision 4; runtime validation remains pending. This repository still contains no working prototype.
+
+### Review follow-up
+
+The six architecture findings are now resolved in revision 4, consolidated by
+Codex from Bob's preserved revisions. See docs/ARCHITECTURE-REVIEW.md.
+Published submission requirements are recorded in docs/ORGANIZER-REQUIREMENTS.md;
+team/account checks still require lablab sign-in. Implementation remains unstarted.

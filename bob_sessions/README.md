@@ -9,3 +9,5 @@ Initial contributor: Codex prepared the repository and documentation. Bob has no
 ## Recorded sessions
 
 - [26 September architecture proposal and revision](2026-09-26-architecture-session.md): actual Bob task, 0.814 Bobcoins, screenshot saved; design still under review.
+
+- [Revision 3 continuation](2026-09-26-architecture-rev3-session.md): same task, cumulative 3.17 Bobcoins; followed by explicitly attributed Codex revision 4.
