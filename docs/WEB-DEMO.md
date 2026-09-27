@@ -1,5 +1,9 @@
 # Interactive web demo
 
+Current public demo: https://handoff.djpapzin.com/ . The named tunnel starts
+automatically on the Oracle VM; no laptop needs to remain awake. Older hosting
+attempts below are a historical log, not current deployment instructions.
+
 Codex authored this web wrapper around the verified Bob-assisted core.
 No new Bob development session or consumption is claimed for this packaging.
 
@@ -193,3 +197,12 @@ Effective deployment instructions: /home/ubuntu/AGENTS.md host routing and
 /opt/agent-handoff-kit/AGENTS.md project scope (standalone installed runtime,
 no VM git checkout). Installed project policy SHA256:
 c1a7ff716e9e7ae82b94b0798cb207671e0fb23c785cf140445472b557bc08a2.
+
+
+## Stable hostname — 27 September 2026
+
+Public demo: https://handoff.djpapzin.com/
+
+Dedicated Cloudflare tunnel `agent-handoff-kit` routes this hostname to `http://127.0.0.1:18880`. The separate `agent-handoff-stable-tunnel.service` is enabled on the existing Oracle VM. It loads a root-protected credential through systemd LoadCredential; no credential is stored in the repository. The temporary Mac transfer file was deleted after installation. Existing unrelated tunnels and routes were preserved. The earlier Quick Tunnel remains available for old links.
+
+Runtime policy source: `/opt/agent-handoff-kit/AGENTS.md`; effective hash `04830f2dd6922d3a434b7a3905ad715f1999fc9d79f33e783268f27016792cdc`. Deployment root `/opt/agent-handoff-kit` is an installed runtime, not a Git checkout.

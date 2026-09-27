@@ -7,10 +7,11 @@ unchanged. Python 3.9+ standard library and SQLite; no installation or API keys.
 
 ## Open the interactive demo
 
-[Live Oracle-hosted demo](https://neighbor-breakdown-refer-pollution.trycloudflare.com/)
+[Live Oracle-hosted demo](https://handoff.djpapzin.com/)
 
-This free temporary HTTPS address changes if its tunnel process restarts. The
-app runs on the existing Oracle VM and does not depend on the Mac being awake.
+The demo runs on an Oracle VM behind a stable Cloudflare hostname. It does not
+depend on a laptop being awake. This is a low-traffic demonstration, not a hosted
+service for processing your own tasks.
 
 ```sh
 python3 -m handoff_kit.web
@@ -26,7 +27,12 @@ reviewed Bob-assisted core. [Hosting instructions](docs/WEB-DEMO.md).
 
 ## Run the CLI demo
 
+Requires Python 3.9+ on macOS or Linux (the demo uses POSIX process signals).
+No pip packages or API keys are needed.
+
 ```sh
+git clone https://github.com/djpapzin/agent-handoff-kit.git
+cd agent-handoff-kit
 python3 demo.py
 ```
 
@@ -80,11 +86,25 @@ Bob authored the initial implementation and revised its tests. Codex reviewed,
 corrected and independently verified it, including the final real-kill demo.
 Bob's preserved implementation is commit `e47d4b5`; subsequent corrections are
 separately attributed. [Actual Bob task evidence](bob_sessions/2026-09-26-core-session.md)
-includes the task ID and consumption screenshot. No prior OddsEdge implementation,
-production data or secrets were copied.
+includes the task ID and consumption screenshot. No prior implementation, production data or secrets were copied.
 
 The local core and interactive web app are ready. The source is public at
 https://github.com/djpapzin/agent-handoff-kit under the MIT license. The app is deployed on the existing Oracle VM and verified over public HTTPS.
-No paid hosting resources were added. Submission video/slides/statements
-and final submission remain future work.
+No paid hosting resources were added.
+
+## Release and media
+
+[Download v0.1.0: demo video, PDF slides and editable deck](https://github.com/djpapzin/agent-handoff-kit/releases/tag/v0.1.0).
+
+This is an experimental local recovery prototype. It is useful for learning,
+inspecting recovery behavior and adapting the core to local workflows. External
+service adapters and reconciliation are not implemented.
+
+Originally built for the September 2026 IBM Bob 2.0 hackathon. The entry was not
+submitted before the deadline; this is an independent open-source release, not
+an accepted hackathon submission. The recorded video retains that original context.
+
+The source code is MIT licensed. Video narration was generated with
+[ElevenLabs](https://elevenlabs.io/); media licensing is described in the release.
+See [contribution guidance](CONTRIBUTING.md) and [security boundaries](SECURITY.md).
 [Organizer requirements](docs/ORGANIZER-REQUIREMENTS.md) record event-specific limits.

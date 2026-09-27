@@ -8,3 +8,10 @@ __pycache__/
 *.db
 *.db-shm
 *.db-wal
+
+# Local media working files
+submission/.build/
+
+# Generated release/media assets are uploaded to GitHub Releases, not Git history.
+release-assets/
+submission/

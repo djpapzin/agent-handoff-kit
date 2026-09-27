@@ -1,0 +1,21 @@
+[Unit]
+Description=Stable HTTPS tunnel for Agent Handoff Kit
+After=network-online.target agent-handoff-kit.service
+Wants=network-online.target agent-handoff-kit.service
+
+[Service]
+Type=simple
+DynamicUser=yes
+LoadCredential=tunnel-token:/etc/agent-handoff-kit/tunnel-token
+ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate run --token-file ${CREDENTIALS_DIRECTORY}/tunnel-token
+Restart=always
+RestartSec=10
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+NoNewPrivileges=yes
+MemoryMax=128M
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target
