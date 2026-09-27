@@ -7,6 +7,11 @@ unchanged. Python 3.9+ standard library and SQLite; no installation or API keys.
 
 ## Open the interactive demo
 
+[Live Oracle-hosted demo](https://neighbor-breakdown-refer-pollution.trycloudflare.com/)
+
+This free temporary HTTPS address changes if its tunnel process restarts. The
+app runs on the existing Oracle VM and does not depend on the Mac being awake.
+
 ```sh
 python3 -m handoff_kit.web
 ```
@@ -79,9 +84,7 @@ includes the task ID and consumption screenshot. No prior OddsEdge implementatio
 production data or secrets were copied.
 
 The local core and interactive web app are ready. The source is public at
-https://github.com/djpapzin/agent-handoff-kit under the MIT license. A PythonAnywhere-compatible WSGI adapter is prepared; public deployment is pending
-because its website returned server errors. Render and Railway free-account limits
-blocked earlier attempts. The hosting budget is zero; no paid upgrade or public
-application deployment has been made. Submission video/slides/statements
+https://github.com/djpapzin/agent-handoff-kit under the MIT license. The app is deployed on the existing Oracle VM and verified over public HTTPS.
+No paid hosting resources were added. Submission video/slides/statements
 and final submission remain future work.
 [Organizer requirements](docs/ORGANIZER-REQUIREMENTS.md) record event-specific limits.

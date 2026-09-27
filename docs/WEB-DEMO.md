@@ -122,3 +122,74 @@ recovered, but following its Log in link still returned HTTP 500. No account, ho
 PythonAnywhere notes that subprocesses outliving a web request may be killed:
 https://help.pythonanywhere.com/pages/AsyncInWebApps/ . This adapter waits for the
 scenario to finish before returning and retains its 20-second process-group limit.
+
+## EU access workaround
+
+A direct unauthenticated HTTP check confirmed the US login returned 502. The
+separate EU site, login and Beginner registration pages loaded successfully.
+The Beginner plan is explicitly EUR0/month. The free signup form is ready at
+https://eu.pythonanywhere.com/registration/register/beginner/ . User account
+creation (password and terms) is required before deployment can continue.
+US and EU accounts are separate. The adapter remains ready and hosted execution
+remains unverified.
+
+## US account access — 27 September
+
+The user signed into the existing US account djpapzin. Its only free web app,
+djpapzin.pythonanywhere.com, is expired and configured for TruthGuard. Explicit
+approval to back up its configuration and reuse the address for Agent Handoff Kit
+is pending. Existing project files must be preserved. No hosted configuration
+change has been made.
+
+The public repository was cloned into /home/djpapzin/agent-handoff-kit without
+changing the existing site. In the idle existing Bash console, Python 3.10 ran
+all 4 WSGI adapter tests successfully in 3.111 seconds, including actual worker
+kill and recovery. This verifies the console environment only; serving through
+the hosted web worker remains pending approval and verification.
+
+## Hosting direction change
+
+The user approved reusing the expired PythonAnywhere site. Its original WSGI
+configuration was backed up remotely to
+/home/djpapzin/truthguard-wsgi-backup-20260927.py with mode 0600 and byte equality
+verified before replacement. The active WSGI file now imports handoff_kit.wsgi
+from the isolated project folder. The site was NOT reactivated or reloaded.
+The user then asked about hosting on their existing Oracle VM; deployment is
+paused at this boundary pending the VM SSH alias or connection details.
+Do not publish or copy the original WSGI backup into this repository.
+
+## Oracle deployment — verified 27 September 2026
+
+Public demo: https://neighbor-breakdown-refer-pollution.trycloudflare.com/
+
+Runtime source (application commit dd06c71) is installed separately under
+/opt/agent-handoff-kit on the existing Oracle VM. Python 3.10.12 runs the HTTP
+wrapper at 127.0.0.1:18880. The agent-handoff-kit and agent-handoff-tunnel systemd
+services are enabled and active. Unit definitions are in deploy/. Dynamic users,
+private temporary storage, read-only system files, inaccessible home directories,
+resource caps and no-new-privileges isolate the demo. No existing service,
+firewall rule, DNS record or shared tunnel was changed. No paid resource was added.
+Disk was 90% used with about 21GB available before deployment; the lightweight
+runtime avoids Docker image builds and dependencies. No production data is used.
+
+Public browser run 342495a090cf passed in 2.77 seconds: worker A killed, generation
+2 DONE, one receipt, nine durable events and unchanged replay. Local health probe
+returned status ok. The first health probe raced service startup; the subsequent
+probe and public run both succeeded. Local suite remains 113 passing tests; no
+new full-suite run is claimed for the VM deployment.
+
+The Quick Tunnel is temporary, without an uptime guarantee. Its address changes
+when the tunnel process restarts; retrieve a replacement with:
+`sudo journalctl -u agent-handoff-tunnel --no-pager | grep trycloudflare.com`.
+Do not use this URL as a permanent submission link without accounting for that
+limitation. A stable named tunnel/domain remains a future improvement.
+
+Rollback only this deployment:
+`sudo systemctl disable --now agent-handoff-tunnel agent-handoff-kit`.
+Keep application files for inspection. PythonAnywhere remains expired and was
+not reloaded; its original WSGI backup remains remote with mode 0600.
+
+Effective deployment instructions: /home/ubuntu/AGENTS.md host routing and
+/opt/agent-handoff-kit/AGENTS.md project scope (standalone installed runtime,
+no VM git checkout). Installed project policy SHA256:
+c1a7ff716e9e7ae82b94b0798cb207671e0fb23c785cf140445472b557bc08a2.
